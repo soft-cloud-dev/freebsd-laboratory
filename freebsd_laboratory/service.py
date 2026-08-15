@@ -12,6 +12,8 @@ from typing import Any
 
 import yaml
 
+from .signing import sign_manifest
+
 
 STAGE_ORDER = (
     "observed",
@@ -113,6 +115,39 @@ class LabService:
             "is_freebsd": system == "FreeBSD",
         }
 
+    def _signing_config(self) -> dict[str, Any]:
+        evidence = self.spec.get("evidence", {})
+        if not isinstance(evidence, dict):
+            return {"enabled": False}
+        signing = evidence.get("signing", {})
+        if signing is None:
+            return {"enabled": False}
+        if not isinstance(signing, dict):
+            raise ValueError("evidence.signing must be a mapping")
+        enabled = signing.get("enabled", False)
+        if not isinstance(enabled, bool):
+            raise ValueError("evidence.signing.enabled must be boolean")
+        if not enabled:
+            return {"enabled": False}
+        algorithm = signing.get("algorithm", "ed25519")
+        if algorithm != "ed25519":
+            raise ValueError("Only Ed25519 evidence signing is supported")
+        key_path = signing.get("private_key")
+        if not isinstance(key_path, str) or not key_path:
+            raise ValueError("evidence.signing.private_key is required when signing is enabled")
+        path = Path(key_path).expanduser()
+        if not path.is_absolute():
+            path = (self.root_dir / path).resolve()
+        key_id = signing.get("key_id", path.name)
+        if not isinstance(key_id, str) or not key_id:
+            raise ValueError("evidence.signing.key_id must be a non-empty string")
+        return {
+            "enabled": True,
+            "algorithm": "ed25519",
+            "private_key": path,
+            "key_id": key_id,
+        }
+
     def record_client_event(self, kind: str, payload: dict[str, Any]) -> EvidenceEvent:
         if kind not in CLIENT_EVENT_KINDS:
             raise ValueError(f"Client event kind is not allowed: {kind}")
@@ -179,6 +214,7 @@ class LabService:
                 }
                 for stage in STAGE_ORDER
             ]
+            signing = self._signing_config()
             return {
                 "schema": "softcloud.lab-state/v1",
                 "lab": {
@@ -191,6 +227,7 @@ class LabService:
                     "session_id": self.session_id,
                     "events": len(self._events),
                     "attestation": "self-recorded",
+                    "signing_enabled": bool(signing["enabled"]),
                 },
                 "stages": stages,
             }
@@ -198,6 +235,7 @@ class LabService:
     def export(self) -> dict[str, Any]:
         with self._lock:
             runtime = self.runtime_identity()
+            signing = self._signing_config()
             evidence = {
                 "schema": "softcloud.lab-evidence/v1",
                 "lab": {
@@ -228,6 +266,13 @@ class LabService:
             evidence_path.write_bytes(canonical_json(evidence) + b"\n")
             environment_path.write_bytes(canonical_json(environment) + b"\n")
 
+            artifacts = {
+                path.name: {
+                    "sha256": sha256_file(path),
+                    "size": path.stat().st_size,
+                }
+                for path in (evidence_path, environment_path, self.events_file)
+            }
             manifest = {
                 "schema": "softcloud.lab-evidence-manifest/v1",
                 "lab_id": self.spec["id"],
@@ -235,8 +280,22 @@ class LabService:
                 "event_count": len(self._events),
                 "attestation": "self-recorded",
                 "generated_at": utc_now(),
+                "artifacts": artifacts,
+                "signature": {
+                    "enabled": bool(signing["enabled"]),
+                    "algorithm": signing.get("algorithm"),
+                    "key_id": signing.get("key_id"),
+                },
             }
             manifest_path.write_bytes(canonical_json(manifest) + b"\n")
+
+            signature_path: Path | None = None
+            if signing["enabled"]:
+                signature_path = sign_manifest(
+                    manifest_path,
+                    Path(signing["private_key"]),
+                    str(signing["key_id"]),
+                )
 
             hashed_paths = [
                 evidence_path,
@@ -244,6 +303,8 @@ class LabService:
                 self.events_file,
                 manifest_path,
             ]
+            if signature_path is not None:
+                hashed_paths.append(signature_path)
             sums = "".join(
                 f"{sha256_file(path)}  {path.name}\n"
                 for path in sorted(hashed_paths, key=lambda item: item.name)
@@ -254,4 +315,5 @@ class LabService:
                 "session_id": self.session_id,
                 "path": str(self.session_dir),
                 "files": [path.name for path in hashed_paths] + [sums_path.name],
+                "signed": signature_path is not None,
             }
