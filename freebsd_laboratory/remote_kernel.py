@@ -87,13 +87,7 @@ def rewrite_connection_file(
     bind_ip: str = "127.0.0.1",
     ports: Sequence[int] | None = None,
 ) -> tuple[Path, str, tuple[int, ...], tuple[int, ...]]:
-    """Bind the Jupyter connection document to leased loopback tunnel ports.
-
-    The original Jupyter ports are retained for cleanup only. When ``ports`` is
-    supplied, the host manager and the staged runtime document are both rewritten
-    to the same leased port set so every runtime gets a collision-free local SSH
-    forwarding namespace without exposing ZMQ on the laboratory bridge.
-    """
+    """Bind the Jupyter connection document to leased loopback tunnel ports."""
 
     connection_file = getattr(parent, "connection_file", None)
     if not connection_file:
@@ -131,8 +125,9 @@ def restore_connection_file(
 
     if original_ip is not None:
         setattr(parent, "ip", original_ip)
-    for field_name, port in zip(CONNECTION_PORT_FIELDS, normalized_ports, strict=True):
-        setattr(parent, field_name, port)
+    if normalized_ports:
+        for field_name, port in zip(CONNECTION_PORT_FIELDS, normalized_ports, strict=True):
+            setattr(parent, field_name, port)
 
     connection_file = getattr(parent, "connection_file", None)
     if not connection_file:
@@ -144,12 +139,27 @@ def restore_connection_file(
         document = json.loads(path.read_text(encoding="utf-8"))
         if original_ip is not None:
             document["ip"] = original_ip
-        for field_name, port in zip(CONNECTION_PORT_FIELDS, normalized_ports, strict=True):
-            document[field_name] = port
+        if normalized_ports:
+            for field_name, port in zip(
+                CONNECTION_PORT_FIELDS, normalized_ports, strict=True
+            ):
+                document[field_name] = port
         path.write_text(json.dumps(document, indent=2) + "\n", encoding="utf-8")
         path.chmod(0o600)
     except (OSError, ValueError, TypeError):
         return
+
+
+def release_jupyter_cached_ports(provisioner: Any, ports: Sequence[int]) -> None:
+    """Return superseded LocalProvisioner ports before installing tunnel leases."""
+    if not getattr(provisioner, "ports_cached", False):
+        return
+    from jupyter_client.connect import LocalPortCache
+
+    cache = LocalPortCache.instance()
+    for port in ports:
+        cache.return_port(int(port))
+    provisioner.ports_cached = False
 
 
 def _pid_is_alive(pid: int) -> bool:
@@ -187,12 +197,12 @@ class LocalPortReservation:
 
 
 class LocalPortLeasePool:
-    """Cross-process lease pool for the five host-side SSH forwarding ports.
+    """Cross-process lease pool for host-side SSH forwarding ports.
 
     Allocation is serialized with ``flock`` and each selected TCP port is bound on
     loopback until the provisioner calls ``launch_kernel``. Lease files remain in
     place while SSH owns the listeners, preventing concurrent laboratory sessions
-    from selecting the same ports even across separate Jupyter server processes.
+    from selecting the same ports across Jupyter processes sharing the pool.
     """
 
     def __init__(
@@ -222,9 +232,19 @@ class LocalPortLeasePool:
         self.directory.mkdir(parents=True, exist_ok=True)
         lock_path = self.directory / ".lock"
         with _LOCAL_PORT_THREAD_LOCK:
-            lock_fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o660)
+            created = False
             try:
-                os.fchmod(lock_fd, 0o660)
+                lock_fd = os.open(
+                    lock_path,
+                    os.O_CREAT | os.O_EXCL | os.O_RDWR,
+                    0o660,
+                )
+                created = True
+            except FileExistsError:
+                lock_fd = os.open(lock_path, os.O_RDWR)
+            try:
+                if created:
+                    os.fchmod(lock_fd, 0o660)
                 fcntl.flock(lock_fd, fcntl.LOCK_EX)
                 try:
                     yield
