@@ -1,16 +1,24 @@
 # FreeBSD Laboratory host-isolation anchor.
 #
-# The host initiates SSH and Jupyter kernel connections to laboratory runtimes.
-# PF state permits replies to those host-originated sessions. New inbound IPv4
-# sessions from a jail or bhyve guest are blocked on the host-only bridge.
+# Jupyter initiates one SSH session to each runtime. All Jupyter ZMQ channels
+# are loopback-bound inside the jail/VM and forwarded through that SSH session.
+# Nothing in the runtime needs to initiate a connection to the host.
 
 lab_if = "labbridge0"
 lab_net = "172.31.254.0/24"
 lab_host = "172.31.254.1"
+lab_ssh_port = "22"
 
-# Add narrowly scoped guest-to-host exceptions above the final block if a lab
-# intentionally consumes a host service. For example:
-# pass in quick on $lab_if inet proto udp from $lab_net to $lab_host port 53 keep state
+# Allow only the host-originated SSH transport. PF state permits reply traffic
+# for this session, including the Jupyter local-forward channels carried inside
+# the encrypted SSH connection.
+pass out quick on $lab_if inet proto tcp from $lab_host to $lab_net port $lab_ssh_port keep state
 
-pass out quick on $lab_if inet from $lab_host to $lab_net keep state
-block in log quick on $lab_if inet all
+# Fail closed for every other host-to-runtime flow on the private bridge. This
+# prevents accidental direct ZMQ exposure from silently becoming a dependency.
+block out log quick on $lab_if inet from $lab_host to $lab_net
+
+# Runtime processes may not initiate IPv4 sessions to the host or through it.
+# Add narrowly scoped exceptions above this rule only when a laboratory has an
+# explicit dependency on a host service.
+block in log quick on $lab_if inet from $lab_net to any
