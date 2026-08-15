@@ -1,14 +1,23 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import shlex
 import shutil
+import socket
 import subprocess
+import threading
 import time
-from dataclasses import dataclass
+from contextlib import contextmanager
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any, Iterator, Sequence
+
+try:
+    import fcntl
+except ImportError:  # pragma: no cover - FreeBSD/Linux provide fcntl
+    fcntl = None  # type: ignore[assignment]
 
 
 CONNECTION_PORT_FIELDS = (
@@ -18,6 +27,8 @@ CONNECTION_PORT_FIELDS = (
     "control_port",
     "hb_port",
 )
+
+_LOCAL_PORT_THREAD_LOCK = threading.Lock()
 
 
 def executable_exists(command: str) -> bool:
@@ -51,25 +62,37 @@ def remote_kernel_command(
 
 def connection_ports(document: dict[str, Any]) -> tuple[int, ...]:
     ports: list[int] = []
-    for field in CONNECTION_PORT_FIELDS:
-        value = document.get(field)
+    for field_name in CONNECTION_PORT_FIELDS:
+        value = document.get(field_name)
         if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= 65535:
-            raise ValueError(f"Invalid Jupyter connection port: {field}")
+            raise ValueError(f"Invalid Jupyter connection port: {field_name}")
         ports.append(value)
     if len(set(ports)) != len(ports):
         raise ValueError("Jupyter connection ports must be unique")
     return tuple(ports)
 
 
+def _validate_port_sequence(ports: Sequence[int]) -> tuple[int, ...]:
+    normalized = tuple(ports)
+    if len(normalized) != len(CONNECTION_PORT_FIELDS):
+        raise ValueError(
+            f"Expected {len(CONNECTION_PORT_FIELDS)} Jupyter connection ports"
+        )
+    document = dict(zip(CONNECTION_PORT_FIELDS, normalized, strict=True))
+    return connection_ports(document)
+
+
 def rewrite_connection_file(
     parent: Any,
     bind_ip: str = "127.0.0.1",
-) -> tuple[Path, str, tuple[int, ...]]:
-    """Bind the host and remote kernel documents to loopback for SSH forwarding.
+    ports: Sequence[int] | None = None,
+) -> tuple[Path, str, tuple[int, ...], tuple[int, ...]]:
+    """Bind the Jupyter connection document to leased loopback tunnel ports.
 
-    Jupyter keeps using its original random TCP ports, but those ports are bound
-    locally by the SSH client and forwarded to the same loopback ports inside the
-    jail/VM. The guest therefore exposes only SSH on the laboratory bridge.
+    The original Jupyter ports are retained for cleanup only. When ``ports`` is
+    supplied, the host manager and the staged runtime document are both rewritten
+    to the same leased port set so every runtime gets a collision-free local SSH
+    forwarding namespace without exposing ZMQ on the laboratory bridge.
     """
 
     connection_file = getattr(parent, "connection_file", None)
@@ -80,22 +103,37 @@ def rewrite_connection_file(
     if document.get("transport", "tcp") != "tcp":
         raise ValueError("SSH kernel transport requires Jupyter TCP connections")
 
-    ports = connection_ports(document)
+    original_ports = connection_ports(document)
+    tunnel_ports = original_ports if ports is None else _validate_port_sequence(ports)
     original_ip = str(document.get("ip", getattr(parent, "ip", "")))
+
     document["ip"] = bind_ip
     setattr(parent, "ip", bind_ip)
+    for field_name, port in zip(CONNECTION_PORT_FIELDS, tunnel_ports, strict=True):
+        document[field_name] = port
+        setattr(parent, field_name, port)
 
     temporary = host_path.with_name(f".{host_path.name}.remote.tmp")
     temporary.write_text(json.dumps(document, indent=2) + "\n", encoding="utf-8")
     temporary.chmod(0o600)
     temporary.replace(host_path)
-    return host_path, original_ip, ports
+    return host_path, original_ip, original_ports, tunnel_ports
 
 
-def restore_connection_file(parent: Any, original_ip: str | None) -> None:
-    if original_ip is None:
-        return
-    setattr(parent, "ip", original_ip)
+def restore_connection_file(
+    parent: Any,
+    original_ip: str | None,
+    original_ports: Sequence[int] = (),
+) -> None:
+    normalized_ports: tuple[int, ...] = ()
+    if original_ports:
+        normalized_ports = _validate_port_sequence(original_ports)
+
+    if original_ip is not None:
+        setattr(parent, "ip", original_ip)
+    for field_name, port in zip(CONNECTION_PORT_FIELDS, normalized_ports, strict=True):
+        setattr(parent, field_name, port)
+
     connection_file = getattr(parent, "connection_file", None)
     if not connection_file:
         return
@@ -104,11 +142,195 @@ def restore_connection_file(parent: Any, original_ip: str | None) -> None:
         return
     try:
         document = json.loads(path.read_text(encoding="utf-8"))
-        document["ip"] = original_ip
+        if original_ip is not None:
+            document["ip"] = original_ip
+        for field_name, port in zip(CONNECTION_PORT_FIELDS, normalized_ports, strict=True):
+            document[field_name] = port
         path.write_text(json.dumps(document, indent=2) + "\n", encoding="utf-8")
         path.chmod(0o600)
     except (OSError, ValueError, TypeError):
         return
+
+
+def _pid_is_alive(pid: int) -> bool:
+    if pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+@dataclass
+class LocalPortReservation:
+    pool: "LocalPortLeasePool"
+    owner: str
+    pid: int
+    ports: tuple[int, ...]
+    _sockets: list[socket.socket] = field(default_factory=list, repr=False)
+
+    def release_reservations(self) -> None:
+        """Release pre-launch bind reservations while retaining lease ownership."""
+        sockets, self._sockets = self._sockets, []
+        for reserved_socket in sockets:
+            try:
+                reserved_socket.close()
+            except OSError:
+                pass
+
+    def release(self) -> None:
+        self.release_reservations()
+        self.pool.release(self.ports, self.owner)
+
+
+class LocalPortLeasePool:
+    """Cross-process lease pool for the five host-side SSH forwarding ports.
+
+    Allocation is serialized with ``flock`` and each selected TCP port is bound on
+    loopback until the provisioner calls ``launch_kernel``. Lease files remain in
+    place while SSH owns the listeners, preventing concurrent laboratory sessions
+    from selecting the same ports even across separate Jupyter server processes.
+    """
+
+    def __init__(
+        self,
+        start: int,
+        end: int,
+        directory: Path | str,
+        bind_address: str = "127.0.0.1",
+    ) -> None:
+        if isinstance(start, bool) or isinstance(end, bool):
+            raise ValueError("Tunnel port range must contain integer TCP ports")
+        if not 1024 <= start <= 65535 or not 1024 <= end <= 65535 or start > end:
+            raise ValueError("Invalid tunnel port range")
+        self.start = start
+        self.end = end
+        self.directory = Path(directory)
+        self.bind_address = bind_address
+
+    @property
+    def capacity(self) -> int:
+        return self.end - self.start + 1
+
+    @contextmanager
+    def _locked(self) -> Iterator[None]:
+        if fcntl is None:
+            raise RuntimeError("Tunnel port leasing requires fcntl/flock support")
+        self.directory.mkdir(parents=True, exist_ok=True)
+        lock_path = self.directory / ".lock"
+        with _LOCAL_PORT_THREAD_LOCK:
+            with lock_path.open("a+", encoding="utf-8") as lock_file:
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+                try:
+                    yield
+                finally:
+                    fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+
+    def _lease_path(self, port: int) -> Path:
+        return self.directory / f"{port}.lease"
+
+    def _read_lease(self, path: Path) -> dict[str, Any] | None:
+        try:
+            value = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError, TypeError):
+            return None
+        return value if isinstance(value, dict) else None
+
+    def _reserve_socket(self, port: int) -> socket.socket | None:
+        reserved_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        try:
+            reserved_socket.bind((self.bind_address, port))
+            reserved_socket.listen(1)
+            return reserved_socket
+        except OSError:
+            reserved_socket.close()
+            return None
+
+    def _candidate_ports(self, owner: str) -> Iterator[int]:
+        offset = int.from_bytes(
+            hashlib.sha256(owner.encode("utf-8")).digest()[:8], "big"
+        ) % self.capacity
+        for index in range(self.capacity):
+            yield self.start + ((offset + index) % self.capacity)
+
+    def allocate(self, owner: str, pid: int, count: int) -> LocalPortReservation:
+        if not owner:
+            raise ValueError("Tunnel port lease owner is required")
+        if pid <= 0:
+            raise ValueError("Tunnel port lease PID must be positive")
+        if count <= 0 or count > self.capacity:
+            raise ValueError("Invalid tunnel port lease count")
+
+        sockets: list[socket.socket] = []
+        ports: list[int] = []
+        created_paths: list[Path] = []
+
+        with self._locked():
+            try:
+                for port in self._candidate_ports(owner):
+                    lease_path = self._lease_path(port)
+                    if lease_path.exists():
+                        lease = self._read_lease(lease_path)
+                        if lease is None:
+                            continue
+                        try:
+                            lease_pid = int(lease.get("pid", 0))
+                        except (TypeError, ValueError):
+                            continue
+                        if _pid_is_alive(lease_pid):
+                            continue
+
+                    reserved_socket = self._reserve_socket(port)
+                    if reserved_socket is None:
+                        continue
+
+                    if lease_path.exists():
+                        lease_path.unlink(missing_ok=True)
+                    lease_path.write_text(
+                        json.dumps({"owner": owner, "pid": pid}) + "\n",
+                        encoding="utf-8",
+                    )
+                    lease_path.chmod(0o660)
+                    created_paths.append(lease_path)
+                    sockets.append(reserved_socket)
+                    ports.append(port)
+                    if len(ports) == count:
+                        return LocalPortReservation(
+                            pool=self,
+                            owner=owner,
+                            pid=pid,
+                            ports=tuple(ports),
+                            _sockets=sockets,
+                        )
+            except Exception:
+                for reserved_socket in sockets:
+                    reserved_socket.close()
+                for lease_path in created_paths:
+                    lease_path.unlink(missing_ok=True)
+                raise
+
+            for reserved_socket in sockets:
+                reserved_socket.close()
+            for lease_path in created_paths:
+                lease_path.unlink(missing_ok=True)
+            raise RuntimeError(
+                f"Unable to reserve {count} SSH tunnel ports in {self.start}-{self.end}"
+            )
+
+    def release(self, ports: Sequence[int], owner: str) -> None:
+        if not ports or not owner:
+            return
+        with self._locked():
+            for port in ports:
+                lease_path = self._lease_path(int(port))
+                if not lease_path.exists():
+                    continue
+                lease = self._read_lease(lease_path)
+                if lease is not None and lease.get("owner") == owner:
+                    lease_path.unlink(missing_ok=True)
 
 
 @dataclass
