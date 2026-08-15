@@ -93,21 +93,23 @@ physical uplink: none
 
 The daemon creates `labbridge0` if it does not exist. No physical interface is attached. Runtime-facing bridge members are marked private so laboratory guests do not forward directly to other private runtime ports.
 
-The host firewall reference in `deploy/freebsd/` narrows this further: host-to-runtime traffic on the bridge is allowed only to TCP/22, all other host-to-runtime IPv4 traffic is blocked, and new runtime-originated IPv4 traffic is blocked.
+The host firewall reference in `deploy/freebsd/` narrows this further: host-to-runtime traffic on the bridge is allowed only to TCP/22, all other host-to-runtime IPv4 traffic is blocked, and new runtime-originated IPv4 traffic is blocked. Installing the anchor file is not sufficient by itself: `/etc/pf.conf` must reference and load the `freebsd-lab` anchor, and the main ruleset must then be reloaded with `pfctl -f /etc/pf.conf`. See `deploy/freebsd/README.md` and `deploy/freebsd/validate-pf.sh`.
 
 ## SSH-only Jupyter transport
 
-Jupyter's five TCP channels are no longer exposed directly on the VNET/bhyve address. The provisioner rewrites the connection document to `127.0.0.1`, copies that document into the runtime, and keeps these same ports connected through SSH local forwards:
+Jupyter's five TCP channels are not exposed directly on the VNET/bhyve address. For each kernel, the provisioner reserves five unique host loopback ports from a shared host-wide lease pool, rewrites the Jupyter connection document to those ports on `127.0.0.1`, copies that document into the runtime, and forwards the leased ports through SSH:
 
 ```text
-Jupyter 127.0.0.1:<shell>   -> SSH -L -> runtime 127.0.0.1:<shell>
-Jupyter 127.0.0.1:<iopub>   -> SSH -L -> runtime 127.0.0.1:<iopub>
-Jupyter 127.0.0.1:<stdin>   -> SSH -L -> runtime 127.0.0.1:<stdin>
-Jupyter 127.0.0.1:<control> -> SSH -L -> runtime 127.0.0.1:<control>
-Jupyter 127.0.0.1:<hb>      -> SSH -L -> runtime 127.0.0.1:<hb>
+Jupyter 127.0.0.1:<leased-shell>   -> SSH -L -> runtime 127.0.0.1:<leased-shell>
+Jupyter 127.0.0.1:<leased-iopub>   -> SSH -L -> runtime 127.0.0.1:<leased-iopub>
+Jupyter 127.0.0.1:<leased-stdin>   -> SSH -L -> runtime 127.0.0.1:<leased-stdin>
+Jupyter 127.0.0.1:<leased-control> -> SSH -L -> runtime 127.0.0.1:<leased-control>
+Jupyter 127.0.0.1:<leased-hb>      -> SSH -L -> runtime 127.0.0.1:<leased-hb>
 ```
 
-The attached SSH process uses connection attempts, server-alive probes, TCP keepalives, and `ExitOnForwardFailure`. If the tunnel cannot be established, kernel startup fails closed. If the attached transport later dies, Jupyter observes the kernel process failure instead of retaining unreachable direct TCP channels.
+The default tunnel pool is `30000-44999`. Allocation is serialized through a shared `flock`-protected lease directory and every candidate is actually bound on loopback before acceptance. Reservation sockets are held until immediately before OpenSSH starts, while lease ownership remains until kernel cleanup. This prevents concurrent FreeBSD Laboratory sessions sharing the lease directory from selecting the same forwarding ports.
+
+The attached SSH process uses connection attempts, server-alive probes, TCP keepalives, and `ExitOnForwardFailure`. If an unrelated host process wins the final reservation-to-OpenSSH bind race, kernel startup fails rather than silently using a conflicting listener. If the attached transport later dies, Jupyter observes the kernel process failure instead of retaining unreachable direct TCP channels.
 
 ### VNET jail lifecycle
 
@@ -125,6 +127,7 @@ Jupyter requests runtime
   -> daemon injects the configured SSH public key
   -> sshd started inside jail
   -> Jupyter waits for authenticated SSH
+  -> five host-wide tunnel ports leased
   -> connection file rebound to loopback and copied over SSH
   -> five local SSH forwards established
   -> ipykernel launched on runtime loopback
@@ -142,6 +145,7 @@ Jupyter requests runtime
   -> vm create -t freebsd-lab -i freebsd-python.raw -C -k <pubkey> -n <netconfig>
   -> vm start
   -> Jupyter waits for authenticated SSH
+  -> five host-wide tunnel ports leased
   -> connection file rebound to loopback and copied over SSH
   -> five local SSH forwards established
   -> ipykernel launched on VM loopback
@@ -241,4 +245,4 @@ pytest -q
 cd labextension && npm run build
 ```
 
-Linux CI validates the portable evidence/state model, Ed25519 signing and verification, runtime reconciliation logic, SSH tunnel construction, address allocation, provisioner helpers, shell syntax, and TypeScript compilation. Actual VNET/epair, PF, ZFS, jail, bhyve and golden-image lifecycles require execution on a dedicated FreeBSD environment.
+Linux CI validates the portable evidence/state model, Ed25519 signing and verification, runtime reconciliation logic, SSH tunnel construction and concurrent port leasing, address allocation, provisioner helpers, shell syntax, and TypeScript compilation. Actual VNET/epair, PF, ZFS, jail, bhyve and golden-image lifecycles require execution on a dedicated FreeBSD environment.
