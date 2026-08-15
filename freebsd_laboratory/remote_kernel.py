@@ -119,6 +119,7 @@ class SSHTransport:
     known_hosts_file: Path
     ssh_command: str = "/usr/bin/ssh"
     scp_command: str = "/usr/bin/scp"
+    config_file: str = "/dev/null"
     connect_timeout: int = 5
     connection_attempts: int = 3
     server_alive_interval: int = 15
@@ -132,6 +133,8 @@ class SSHTransport:
                 raise RuntimeError(f"Required executable is unavailable: {command}")
         if not Path(self.private_key).is_file():
             raise RuntimeError(f"Required SSH private key is unavailable: {self.private_key}")
+        if not Path(self.config_file).is_file():
+            raise RuntimeError(f"SSH client configuration path is unavailable: {self.config_file}")
 
     @property
     def target(self) -> str:
@@ -139,6 +142,8 @@ class SSHTransport:
 
     def options(self) -> list[str]:
         return [
+            "-F",
+            self.config_file,
             "-i",
             self.private_key,
             "-o",
@@ -159,6 +164,8 @@ class SSHTransport:
             "ExitOnForwardFailure=yes",
             "-o",
             "StrictHostKeyChecking=accept-new",
+            "-o",
+            "GlobalKnownHostsFile=/dev/null",
             "-o",
             f"UserKnownHostsFile={self.known_hosts_file}",
         ]
