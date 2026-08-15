@@ -23,19 +23,24 @@ LAB_PKG_REPOS_DIR=${LAB_PKG_REPOS_DIR:-}
 LAB_FAIL_ON_PKG_AUDIT=${LAB_FAIL_ON_PKG_AUDIT:-YES}
 VM_IMAGE_CONFIG=${VM_IMAGE_CONFIG:-${SCRIPT_DIR}/vmimage.conf}
 
-for command in git make sha256 install; do
+for command in git make sha256 install grep; do
     if ! command -v "$command" >/dev/null 2>&1; then
         echo "Required command is unavailable: $command" >&2
         exit 1
     fi
 done
 
-if [ ! -f "${SRC_DIR}/release/Makefile" ]; then
+if [ ! -f "${SRC_DIR}/release/Makefile" ] || [ ! -f "${SRC_DIR}/release/Makefile.vm" ]; then
     echo "FreeBSD release source tree not found at ${SRC_DIR}" >&2
     exit 1
 fi
 if [ ! -f "$VM_IMAGE_CONFIG" ]; then
     echo "VM image configuration not found: $VM_IMAGE_CONFIG" >&2
+    exit 1
+fi
+if ! grep -q 'VM_IMAGE_CONFIG' "${SRC_DIR}/release/Makefile.vm"; then
+    echo "Selected FreeBSD source does not pass VM_IMAGE_CONFIG to the vm-image target." >&2
+    echo "Refusing to build an uncustomized laboratory image. Use a source revision with VM_IMAGE_CONFIG support." >&2
     exit 1
 fi
 
@@ -71,7 +76,7 @@ fi
 
 SOURCE_IMAGE="${OBJDIR}/freebsd-python.ufs.raw"
 if [ ! -f "$SOURCE_IMAGE" ]; then
-    echo "Expected release image was not produced: $SOURCE_IMAGE" >&2
+    echo "Expected customized release image was not produced: $SOURCE_IMAGE" >&2
     exit 1
 fi
 
