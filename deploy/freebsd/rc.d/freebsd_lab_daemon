@@ -43,6 +43,8 @@ freebsd_lab_daemon_prestart()
 
     /usr/bin/install -d -o root -g "${freebsd_lab_daemon_group}" -m 0750 \
         /var/run/freebsd-laboratory
+    /usr/bin/install -d -o root -g "${freebsd_lab_daemon_group}" -m 2770 \
+        /var/run/freebsd-laboratory/tunnel-port-leases
     /usr/bin/install -d -o root -g wheel -m 0700 \
         /var/db/freebsd-laboratory
 }
