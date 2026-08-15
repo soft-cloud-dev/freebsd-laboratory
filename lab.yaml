@@ -14,6 +14,15 @@ executor:
   dataset_parent: zroot/jails/containers
   mount_root: /usr/local/jails/containers
   network: inherit
+  alternatives:
+    bhyve:
+      kernelspec: freebsd-python-bhyve
+      manager: vm-bhyve
+      ephemeral: true
+      template: freebsd-lab
+      image: freebsd-python.raw
+      network: 172.31.254.0/24
+      address_pool: 172.31.254.100-172.31.254.199
 
 notebook: notebooks/Intro.ipynb
 
