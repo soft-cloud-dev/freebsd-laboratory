@@ -1,0 +1,6 @@
+# Add these lines to the host's main /etc/pf.conf.
+# Place the anchor before any broad quick-pass rule that would otherwise accept
+# traffic on labbridge0.
+
+anchor "freebsd-lab" on labbridge0
+load anchor "freebsd-lab" from "/usr/local/etc/pf.anchors/freebsd-lab"
