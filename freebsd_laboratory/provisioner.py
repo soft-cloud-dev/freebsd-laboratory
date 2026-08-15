@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import platform
 import re
 import shutil
 import subprocess
@@ -32,7 +33,7 @@ class FreeBSDJailProvisioner(LocalProvisioner):
     """Launch a Jupyter kernel inside a disposable ZFS-backed FreeBSD jail.
 
     This first implementation intentionally requires the Jupyter Server itself to
-    run on FreeBSD.  It does not emulate a jail on other operating systems.
+    run on FreeBSD. It does not emulate a jail on other operating systems.
     """
 
     template_snapshot: str = Unicode(
@@ -51,10 +52,12 @@ class FreeBSDJailProvisioner(LocalProvisioner):
     jail_name: str | None = None
     jail_dataset: str | None = None
     jail_root: Path | None = None
+    _clone_created = False
+    _jail_created = False
 
     @staticmethod
     def _assert_supported_host() -> None:
-        if os.uname().sysname != "FreeBSD":
+        if platform.system() != "FreeBSD":
             raise RuntimeError("FreeBSD jail provisioner requires a FreeBSD host")
         if os.geteuid() != 0:
             raise PermissionError("FreeBSD jail provisioner requires root privileges")
@@ -73,9 +76,11 @@ class FreeBSDJailProvisioner(LocalProvisioner):
         return result
 
     def _create_runtime(self) -> None:
-        self.jail_name = runtime_name(self.kernel_id)
+        self.jail_name = runtime_name(str(self.kernel_id))
         self.jail_dataset = f"{self.dataset_parent.rstrip('/')}/{self.jail_name}"
         self.jail_root = (Path(self.mount_root) / self.jail_name).resolve()
+        self._clone_created = False
+        self._jail_created = False
 
         try:
             self._run(
@@ -88,6 +93,7 @@ class FreeBSDJailProvisioner(LocalProvisioner):
                     self.jail_dataset,
                 ]
             )
+            self._clone_created = True
             self._run(
                 [
                     "jail",
@@ -102,6 +108,7 @@ class FreeBSDJailProvisioner(LocalProvisioner):
                     "ip6=disable",
                 ]
             )
+            self._jail_created = True
         except Exception:
             self._destroy_runtime()
             raise
@@ -122,10 +129,12 @@ class FreeBSDJailProvisioner(LocalProvisioner):
         jail_path.chmod(0o600)
 
     def _destroy_runtime(self) -> None:
-        if self.jail_name:
+        if self._jail_created and self.jail_name:
             self._run(["jail", "-r", self.jail_name], check=False)
-        if self.jail_dataset:
+        if self._clone_created and self.jail_dataset:
             self._run(["zfs", "destroy", "-r", self.jail_dataset], check=False)
+        self._jail_created = False
+        self._clone_created = False
         self.jail_name = None
         self.jail_dataset = None
         self.jail_root = None
@@ -136,6 +145,8 @@ class FreeBSDJailProvisioner(LocalProvisioner):
         self._create_runtime()
         try:
             self._mirror_connection_file()
+            if self.jail_name is None:
+                raise RuntimeError("Jail name is not initialized")
             kernel_command = list(prepared["cmd"])
             prepared["cmd"] = ["jexec", "-l", self.jail_name, *kernel_command]
             prepared.pop("cwd", None)
@@ -157,6 +168,8 @@ class FreeBSDJailProvisioner(LocalProvisioner):
                 "jail_name": self.jail_name,
                 "jail_dataset": self.jail_dataset,
                 "jail_root": str(self.jail_root) if self.jail_root else None,
+                "clone_created": self._clone_created,
+                "jail_created": self._jail_created,
             }
         )
         return info
@@ -167,3 +180,5 @@ class FreeBSDJailProvisioner(LocalProvisioner):
         self.jail_dataset = provisioner_info.get("jail_dataset")
         jail_root = provisioner_info.get("jail_root")
         self.jail_root = Path(jail_root) if jail_root else None
+        self._clone_created = bool(provisioner_info.get("clone_created"))
+        self._jail_created = bool(provisioner_info.get("jail_created"))
