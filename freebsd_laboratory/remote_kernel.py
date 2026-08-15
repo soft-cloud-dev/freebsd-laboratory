@@ -222,12 +222,16 @@ class LocalPortLeasePool:
         self.directory.mkdir(parents=True, exist_ok=True)
         lock_path = self.directory / ".lock"
         with _LOCAL_PORT_THREAD_LOCK:
-            with lock_path.open("a+", encoding="utf-8") as lock_file:
-                fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+            lock_fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o660)
+            try:
+                os.fchmod(lock_fd, 0o660)
+                fcntl.flock(lock_fd, fcntl.LOCK_EX)
                 try:
                     yield
                 finally:
-                    fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+                    fcntl.flock(lock_fd, fcntl.LOCK_UN)
+            finally:
+                os.close(lock_fd)
 
     def _lease_path(self, port: int) -> Path:
         return self.directory / f"{port}.lease"
@@ -274,21 +278,20 @@ class LocalPortLeasePool:
                     lease_path = self._lease_path(port)
                     if lease_path.exists():
                         lease = self._read_lease(lease_path)
-                        if lease is None:
+                        lease_pid = 0
+                        if lease is not None:
+                            try:
+                                lease_pid = int(lease.get("pid", 0))
+                            except (TypeError, ValueError):
+                                lease_pid = 0
+                        if lease_pid > 0 and _pid_is_alive(lease_pid):
                             continue
-                        try:
-                            lease_pid = int(lease.get("pid", 0))
-                        except (TypeError, ValueError):
-                            continue
-                        if _pid_is_alive(lease_pid):
-                            continue
+                        lease_path.unlink(missing_ok=True)
 
                     reserved_socket = self._reserve_socket(port)
                     if reserved_socket is None:
                         continue
 
-                    if lease_path.exists():
-                        lease_path.unlink(missing_ok=True)
                     lease_path.write_text(
                         json.dumps({"owner": owner, "pid": pid}) + "\n",
                         encoding="utf-8",
