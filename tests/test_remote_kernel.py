@@ -78,6 +78,9 @@ def test_ssh_transport_forwards_all_kernel_ports_with_keepalives(tmp_path: Path)
     command = transport.command("exec python3 -m ipykernel_launcher", forward_ports=PORTS.values())
     rendered = " ".join(command)
 
+    assert "-F" in command
+    assert "/dev/null" in command
+    assert "GlobalKnownHostsFile=/dev/null" in command
     assert "ConnectTimeout=5" in command
     assert "ConnectionAttempts=3" in command
     assert "ServerAliveInterval=15" in command
