@@ -22,6 +22,7 @@ load_rc_config "$name"
 : ${freebsd_lab_daemon_address_start:="172.31.254.10"}
 : ${freebsd_lab_daemon_address_end:="172.31.254.199"}
 : ${freebsd_lab_daemon_bridge:="labbridge0"}
+: ${freebsd_lab_daemon_configure_bridge_filter:="YES"}
 : ${freebsd_lab_daemon_runtime_args:=""}
 
 pidfile="${freebsd_lab_daemon_pidfile}"
@@ -29,6 +30,7 @@ command="/usr/sbin/daemon"
 procname="/usr/sbin/daemon"
 required_modules="if_bridge if_epair"
 start_precmd="${name}_prestart"
+start_postcmd="${name}_poststart"
 
 freebsd_lab_daemon_prestart()
 {
@@ -43,6 +45,14 @@ freebsd_lab_daemon_prestart()
         /var/run/freebsd-laboratory
     /usr/bin/install -d -o root -g wheel -m 0700 \
         /var/db/freebsd-laboratory
+}
+
+freebsd_lab_daemon_poststart()
+{
+    if checkyesno freebsd_lab_daemon_configure_bridge_filter; then
+        /sbin/sysctl net.link.bridge.pfil_bridge=1 >/dev/null || return 1
+        /sbin/sysctl net.link.bridge.pfil_member=0 >/dev/null || return 1
+    fi
 }
 
 command_args="-f -P ${pidfile} -S -T ${name} \
