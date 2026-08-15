@@ -10,10 +10,21 @@ runtime:
 executor:
   type: jail
   ephemeral: true
+  control:
+    mode: unix-socket
+    socket: /var/run/freebsd-laboratory/runtime.sock
+    privileged_daemon: freebsd-lab-runtime-daemon
   template_snapshot: zroot/jails/templates/freebsd-python@clean
   dataset_parent: zroot/jails/containers
   mount_root: /usr/local/jails/containers
-  network: inherit
+  network:
+    mode: vnet
+    bridge: labbridge0
+    cidr: 172.31.254.0/24
+    host_address: 172.31.254.1
+    address_pool: 172.31.254.10-172.31.254.199
+    uplink: none
+    private_members: true
   alternatives:
     bhyve:
       kernelspec: freebsd-python-bhyve
@@ -21,8 +32,9 @@ executor:
       ephemeral: true
       template: freebsd-lab
       image: freebsd-python.raw
+      switch: freebsdlab
+      bridge: labbridge0
       network: 172.31.254.0/24
-      address_pool: 172.31.254.100-172.31.254.199
 
 notebook: notebooks/Intro.ipynb
 
@@ -40,6 +52,11 @@ evidence:
   stderr: true
   environment: true
   hashes: true
+  signing:
+    enabled: false
+    algorithm: ed25519
+    key_id: software-cloud-lab
+    private_key: /usr/local/etc/freebsd-laboratory/evidence-ed25519.pem
 
 stages:
   - observed
