@@ -1,0 +1,6 @@
+# Append these settings to /etc/sysctl.conf on the FreeBSD host.
+# They make PF evaluate traffic on labbridge0 rather than duplicating the same
+# policy on each epair/tap member.
+
+net.link.bridge.pfil_bridge=1
+net.link.bridge.pfil_member=0
