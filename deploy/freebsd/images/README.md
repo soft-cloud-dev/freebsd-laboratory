@@ -62,6 +62,8 @@ Do not destroy an older snapshot while active ZFS clones still depend on it.
 
 `build-bhyve-image.sh` drives the FreeBSD release `vm-image` target with raw/UFS output and `vmimage.conf`. The configuration adds Python, ipykernel, cloud-init, the `freebsd` account, and the restricted SSH policy before the image is unmounted.
 
+The builder fails closed unless the selected FreeBSD source revision exposes `VM_IMAGE_CONFIG` in `release/Makefile.vm`. Without that support, `make vm-image` would ignore the laboratory customization file and could produce an apparently valid but unusable base image. Select a patched source revision that supports the customization hook instead of activating an uncustomized image.
+
 Artifacts are versioned under `/var/db/freebsd-laboratory/images` by default:
 
 ```text
