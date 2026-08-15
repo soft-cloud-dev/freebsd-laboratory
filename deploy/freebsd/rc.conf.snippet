@@ -1,0 +1,7 @@
+# Merge these settings into /etc/rc.conf. If cloned_interfaces already contains
+# other interfaces, append labbridge0 instead of replacing the existing value.
+
+cloned_interfaces="labbridge0"
+ifconfig_labbridge0="inet 172.31.254.1/24 up"
+freebsd_lab_daemon_enable="YES"
+pf_enable="YES"
