@@ -1,0 +1,22 @@
+{
+  "argv": [
+    "/usr/local/bin/python3",
+    "-m",
+    "ipykernel_launcher",
+    "-f",
+    "{connection_file}"
+  ],
+  "display_name": "FreeBSD (Python 3)",
+  "language": "python",
+  "interrupt_mode": "signal",
+  "metadata": {
+    "kernel_provisioner": {
+      "provisioner_name": "freebsd-jail-provisioner",
+      "config": {
+        "template_snapshot": "zroot/jails/templates/freebsd-python@clean",
+        "dataset_parent": "zroot/jails/containers",
+        "mount_root": "/usr/local/jails/containers"
+      }
+    }
+  }
+}

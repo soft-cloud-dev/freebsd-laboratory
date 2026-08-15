@@ -10,6 +10,10 @@ runtime:
 executor:
   type: jail
   ephemeral: true
+  template_snapshot: zroot/jails/templates/freebsd-python@clean
+  dataset_parent: zroot/jails/containers
+  mount_root: /usr/local/jails/containers
+  network: inherit
 
 notebook: notebooks/Intro.ipynb
 

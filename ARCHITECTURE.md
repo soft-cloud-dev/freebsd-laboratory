@@ -1,57 +1,121 @@
-# Prototype architecture
+# Implementation architecture
 
-## Principle
+## Governing rule
 
-The browser reports observations. It does not manufacture them.
+The browser reports observations. It does not manufacture platform-verified claims.
 
 ```text
 JupyterLab
-    |
-    | Jupyter protocol + laboratory commands
-    v
-Laboratory Server
-    |-- runtime manager
-    |-- evidence recorder
-    |-- verifier
-    `-- progression state
-    |
-    +--> FreeBSD jail (default userspace labs)
-    `--> bhyve VM (kernel/privileged labs)
+  |  NotebookActions execution observations
+  |  authenticated REST
+  v
+FreeBSD Laboratory server extension
+  |-- evidence session
+  |-- event validation
+  |-- progression derivation
+  `-- evidence export + SHA-256 manifest
+  |
+  | Jupyter kernel lifecycle
+  v
+FreeBSDJailProvisioner
+  |-- ZFS clone
+  |-- jail(8)
+  |-- connection-file mirror
+  `-- jexec(8)
+       |
+       v
+Disposable FreeBSD jail
+       `-- Python / ipykernel
 ```
 
-## Prototype boundary
+## Implemented boundaries
 
-`prototype/runtime.py` defines the executor boundary. The local executor exists only for development. `FreeBSDExecutor` refuses to claim a FreeBSD runtime when the process is not actually running on FreeBSD.
+### JupyterLab extension
 
-`prototype/evidence.py` records commands, exit codes, stdout/stderr, timestamps, and content hashes. Notebook output remains presentation; the evidence stream is the record.
+`labextension/src/index.ts` adds the right-side progression surface and an `Export evidence` notebook-toolbar action. It observes `NotebookActions.executed` and records the serialized cell, execution success state, notebook path, and cell id.
 
-`prototype/progression.py` derives trust stages from evidence/state rather than treating the UI as a collection of manually checked boxes.
+Those events are useful evidence but remain browser-originated. The server labels them `jupyterlab-observer` and exposes the session attestation as `self-recorded`.
 
-`lab.yaml` is the declarative laboratory contract.
+### Jupyter Server extension
 
-## Production path
+`freebsd_laboratory/app.py` registers authenticated endpoints:
 
-1. Implement a Jupyter Server extension that owns the evidence stream.
-2. Implement a JupyterLab extension for the progression panel and Export evidence command.
-3. Add a jail executor that creates a disposable jail from a known FreeBSD base snapshot.
-4. Add a bhyve executor for experiments requiring a separate kernel or privileged device/network access.
-5. Execute notebooks in fresh environments and export deterministic evidence bundles.
-6. Add verification that reruns the notebook from a clean runtime and evaluates declared assertions.
+```text
+/freebsd-lab/api/state
+/freebsd-lab/api/events
+/freebsd-lab/api/export
+```
+
+`freebsd_laboratory/service.py` owns the append-only session event stream. The browser API only accepts `notebook-context` and `cell-executed`; it cannot submit `verification-complete`, `recovery-complete`, or other machine-stage events.
+
+Progression is derived from evidence rather than from manually toggled UI state.
+
+### Kernel provisioner
+
+`freebsd_laboratory/provisioner.py` is a `LocalProvisioner` specialization. It requires a real FreeBSD host and root privileges, clones a declared ZFS snapshot, creates a persistent jail, mirrors the Jupyter connection file at the same absolute path inside the jail, and wraps the generated kernel command in `jexec -l`.
+
+The lifecycle is fail-closed on non-FreeBSD hosts. Runtime creation errors trigger jail/dataset cleanup rather than falling back to a local host kernel.
+
+## Trust model
+
+The current trust levels are deliberately asymmetric:
+
+| Stage | Current derivation | Trust source |
+|---|---|---|
+| Observed | at least one `cell-executed` event | self-recorded browser observation |
+| Explained | notebook context contains markdown | self-recorded browser observation |
+| Reproduced | `reproduction-complete` | server-only machine event |
+| Modified | `mutation-applied` | server-only machine event |
+| Verified | `verification-complete` | server-only machine event |
+| Recovered | `recovery-complete` | server-only machine event |
+| Designed | `design-validated` | server-only machine event |
+
+The later five event producers are not implemented yet. This prevents the UI from showing those stages as complete before there is an actual verifier/reproducer behind them.
+
+## Jail runtime
+
+The bundled kernelspec registers `freebsd-jail-provisioner` and expects a ZFS template snapshot containing `/usr/local/bin/python3` and `ipykernel`.
+
+A kernel launch performs:
+
+```text
+zfs clone
+  -> jail -c
+  -> copy connection file into jail root
+  -> jexec -l <jail> <kernel command>
+```
+
+Shutdown performs:
+
+```text
+kernel process ends
+  -> jail -r
+  -> zfs destroy -r <ephemeral clone>
+```
+
+The prototype currently uses `ip4=inherit` to preserve local Jupyter kernel connectivity. This is not the target security boundary. The production design should move kernel traffic onto a dedicated private loopback or VNET interface and add explicit resource controls.
 
 ## Evidence bundle
 
+A server-owned export currently produces:
+
 ```text
 evidence/
-|-- manifest.json
-|-- evidence.json
-|-- notebook.ipynb
-|-- notebook.executed.ipynb
-|-- environment.json
-|-- commands.jsonl
-|-- stdout/
-|-- stderr/
-|-- assertions.json
-`-- SHA256SUMS
+`-- <session-id>/
+    |-- evidence.json
+    |-- environment.json
+    |-- events.jsonl
+    |-- manifest.json
+    `-- SHA256SUMS
 ```
 
-The prototype intentionally does not fake jail or bhyve provisioning on non-FreeBSD systems. Those executors are the next implementation boundary.
+`lab.yaml` itself is hashed into the evidence document. Payload hashes are calculated by the server after receipt.
+
+## Next implementation slice
+
+1. Add a FreeBSD CI/self-hosted runner that creates and destroys a real jail kernel.
+2. Bind kernel lifecycle/runtime identity events directly into the server evidence stream.
+3. Execute the notebook twice in clean clones and emit `reproduction-complete` only when the declared comparison policy passes.
+4. Implement `checks:` from `lab.yaml` as server-side assertions and emit `verification-complete` from their results.
+5. Replace `ip4=inherit` with an isolated kernel transport.
+6. Include executed notebook and per-output artifacts in the exported bundle.
