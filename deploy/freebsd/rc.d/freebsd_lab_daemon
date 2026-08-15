@@ -27,6 +27,7 @@ load_rc_config "$name"
 pidfile="${freebsd_lab_daemon_pidfile}"
 command="/usr/sbin/daemon"
 procname="/usr/sbin/daemon"
+required_modules="if_bridge if_epair"
 start_precmd="${name}_prestart"
 
 freebsd_lab_daemon_prestart()
