@@ -5,18 +5,28 @@ from pathlib import Path
 from jupyter_client.kernelspec import KernelSpecManager
 
 
-def main() -> None:
-    source = Path(__file__).parent / "kernels" / "freebsd-python"
-    if not source.is_dir():
-        raise RuntimeError(f"Bundled kernelspec not found: {source}")
+KERNELSPECS = (
+    "freebsd-python",
+    "freebsd-python-bhyve",
+)
 
-    destination = KernelSpecManager().install_kernel_spec(
-        str(source),
-        kernel_name="freebsd-python",
-        user=True,
-        replace=True,
-    )
-    print(f"Installed FreeBSD Laboratory kernelspec at {destination}")
+
+def main() -> None:
+    root = Path(__file__).parent / "kernels"
+    manager = KernelSpecManager()
+
+    for kernel_name in KERNELSPECS:
+        source = root / kernel_name
+        if not source.is_dir():
+            raise RuntimeError(f"Bundled kernelspec not found: {source}")
+
+        destination = manager.install_kernel_spec(
+            str(source),
+            kernel_name=kernel_name,
+            user=True,
+            replace=True,
+        )
+        print(f"Installed {kernel_name} at {destination}")
 
 
 if __name__ == "__main__":
