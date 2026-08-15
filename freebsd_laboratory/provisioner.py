@@ -4,6 +4,7 @@ import asyncio
 import os
 import platform
 import re
+import shlex
 import shutil
 from pathlib import Path
 from typing import Any
@@ -143,7 +144,7 @@ class FreeBSDJailProvisioner(LocalProvisioner):
                 remote_connection,
             )
             prepared["cmd"] = transport.command(
-                "exec " + " ".join(__import__("shlex").quote(value) for value in kernel_command)
+                "exec " + " ".join(shlex.quote(value) for value in kernel_command)
             )
             prepared.pop("cwd", None)
             return prepared
