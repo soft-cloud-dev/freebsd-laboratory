@@ -9,12 +9,11 @@ import os
 import platform
 import re
 import shlex
-import shutil
 import socketserver
 import stat
 import subprocess
 import tempfile
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Sequence
 
@@ -42,6 +41,7 @@ class RuntimeConfig:
     jail_dataset_parent: str = "zroot/jails/containers"
     jail_mount_root: str = "/usr/local/jails/containers"
     jail_interface_name: str = "vnet0"
+    jail_ssh_user: str = "freebsd"
     jail_sshd_service: str = "/usr/sbin/service"
     vm_command: str = "/usr/local/sbin/vm"
     vm_template: str = "freebsd-lab"
@@ -180,19 +180,21 @@ class RuntimeManager:
             [self.config.vm_command, "switch", "info", self.config.vm_switch],
             check=False,
         )
-        if result.returncode == 0:
-            return
+        if result.returncode != 0:
+            self._run(
+                [
+                    self.config.vm_command,
+                    "switch",
+                    "create",
+                    "-t",
+                    "manual",
+                    "-b",
+                    self.config.bridge_name,
+                    self.config.vm_switch,
+                ]
+            )
         self._run(
-            [
-                self.config.vm_command,
-                "switch",
-                "create",
-                "-t",
-                "manual",
-                "-b",
-                self.config.bridge_name,
-                self.config.vm_switch,
-            ]
+            [self.config.vm_command, "switch", "private", self.config.vm_switch, "on"]
         )
 
     def _allocate(self, name: str) -> str:
@@ -201,6 +203,43 @@ class RuntimeManager:
             self.pool.release(address, name)
             raise RuntimeError("Address pool contains the host bridge address")
         return address
+
+    def _install_jail_authorized_key(self, jail_root: str) -> None:
+        public_key = Path(self.config.ssh_public_key)
+        if not public_key.is_file():
+            raise RuntimeError(f"Runtime SSH public key is unavailable: {public_key}")
+        user = self._run(
+            [
+                "pw",
+                "-R",
+                jail_root,
+                "usershow",
+                "-n",
+                self.config.jail_ssh_user,
+                "-7",
+            ]
+        ).stdout.strip()
+        fields = user.split(":")
+        if len(fields) != 7:
+            raise RuntimeError(f"Unable to resolve jail SSH user: {self.config.jail_ssh_user}")
+        uid = int(fields[2])
+        gid = int(fields[3])
+        home = fields[5]
+        if not home.startswith("/") or home == "/":
+            raise RuntimeError("Jail SSH user must have a dedicated absolute home directory")
+
+        home_path = (Path(jail_root) / home.lstrip("/")).resolve()
+        jail_root_path = Path(jail_root).resolve()
+        if jail_root_path not in home_path.parents:
+            raise RuntimeError("Jail SSH home escapes the jail root")
+        ssh_dir = home_path / ".ssh"
+        ssh_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+        ssh_dir.chmod(0o700)
+        os.chown(ssh_dir, uid, gid)
+        authorized_keys = ssh_dir / "authorized_keys"
+        authorized_keys.write_bytes(public_key.read_bytes())
+        authorized_keys.chmod(0o600)
+        os.chown(authorized_keys, uid, gid)
 
     def create_jail(self, name: str, owner_pid: int) -> dict[str, Any]:
         name = self.validate_name(name)
@@ -241,6 +280,7 @@ class RuntimeManager:
             )
             record["dataset_created"] = True
             self._write_registry(record)
+            self._install_jail_authorized_key(jail_root)
 
             epair_result = self._run(["ifconfig", "epair", "create"])
             epair_host = epair_result.stdout.strip().splitlines()[-1].strip()
@@ -267,8 +307,6 @@ class RuntimeManager:
                     "mount.devfs",
                     "vnet",
                     f"vnet.interface={epair_guest}",
-                    "ip4=disable",
-                    "ip6=disable",
                 ]
             )
             record["jail_created"] = True
@@ -613,6 +651,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--jail-template", default="zroot/jails/templates/freebsd-python@clean")
     parser.add_argument("--jail-dataset-parent", default="zroot/jails/containers")
     parser.add_argument("--jail-mount-root", default="/usr/local/jails/containers")
+    parser.add_argument("--jail-ssh-user", default="freebsd")
     parser.add_argument("--vm-command", default="/usr/local/sbin/vm")
     parser.add_argument("--vm-template", default="freebsd-lab")
     parser.add_argument("--vm-image", default="freebsd-python.raw")
@@ -645,6 +684,7 @@ def main() -> None:
         jail_template_snapshot=args.jail_template,
         jail_dataset_parent=args.jail_dataset_parent,
         jail_mount_root=args.jail_mount_root,
+        jail_ssh_user=args.jail_ssh_user,
         vm_command=args.vm_command,
         vm_template=args.vm_template,
         vm_image=args.vm_image,
