@@ -1,11 +1,17 @@
 {
-  "extends": "@jupyterlab/builder/lib/tsconfig.base.json",
   "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "lib": ["DOM", "DOM.Iterable", "ES2022"],
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
     "rootDir": "src",
     "outDir": "lib",
     "declaration": true,
     "sourceMap": true,
     "noEmitOnError": true
   },
-  "include": ["src/**/*"]
+  "include": ["src/**/*.ts"]
 }
