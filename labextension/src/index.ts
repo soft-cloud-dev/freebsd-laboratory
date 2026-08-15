@@ -14,6 +14,7 @@ import { Widget } from '@lumino/widgets';
 
 const PLUGIN_ID = '@softcloud/freebsd-laboratory:plugin';
 const EXPORT_COMMAND = 'freebsd-laboratory:export-evidence';
+const JSON_HEADERS = { 'Content-Type': 'application/json' };
 
 interface StageState {
   id: string;
@@ -77,6 +78,7 @@ async function postEvent(
 ): Promise<LaboratoryState> {
   const response = await requestJson<{ state: LaboratoryState }>('events', {
     method: 'POST',
+    headers: JSON_HEADERS,
     body: JSON.stringify({ kind, payload })
   });
   return response.state;
@@ -136,9 +138,7 @@ class ProgressionPanel extends Widget {
     this.node.replaceChildren();
 
     if (this.error) {
-      this.node.appendChild(
-        element('div', 'freebsdLab-Error', this.error)
-      );
+      this.node.appendChild(element('div', 'freebsdLab-Error', this.error));
       return;
     }
 
@@ -153,7 +153,9 @@ class ProgressionPanel extends Widget {
     const body = element('div', 'freebsdLab-Body');
 
     const pathSection = element('section', 'freebsdLab-Section');
-    pathSection.appendChild(element('div', 'freebsdLab-Eyebrow', 'Execution path'));
+    pathSection.appendChild(
+      element('div', 'freebsdLab-Eyebrow', 'Execution path')
+    );
     pathSection.appendChild(
       element('div', 'freebsdLab-PathTitle', 'Path A · Governed laboratory')
     );
@@ -167,7 +169,9 @@ class ProgressionPanel extends Widget {
     body.appendChild(pathSection);
 
     const trustSection = element('section', 'freebsdLab-Section');
-    trustSection.appendChild(element('div', 'freebsdLab-Eyebrow', 'Trust stages'));
+    trustSection.appendChild(
+      element('div', 'freebsdLab-Eyebrow', 'Trust stages')
+    );
     const stageList = element('ol', 'freebsdLab-Stages');
     state.stages.forEach((stage, index) => {
       const row = element('li', 'freebsdLab-Stage');
@@ -179,7 +183,10 @@ class ProgressionPanel extends Widget {
         'freebsdLab-StageMarker',
         stage.completed ? '✓' : String(index + 1)
       );
-      row.append(marker, element('span', 'freebsdLab-StageLabel', stage.label));
+      row.append(
+        marker,
+        element('span', 'freebsdLab-StageLabel', stage.label)
+      );
       stageList.appendChild(row);
     });
     trustSection.appendChild(stageList);
@@ -197,7 +204,11 @@ class ProgressionPanel extends Widget {
 
     const footer = element('div', 'freebsdLab-Footer');
     footer.appendChild(
-      element('span', 'freebsdLab-Attestation', state.evidence.attestation.toUpperCase())
+      element(
+        'span',
+        'freebsdLab-Attestation',
+        state.evidence.attestation.toUpperCase()
+      )
     );
     footer.appendChild(
       element(
@@ -243,6 +254,7 @@ const plugin: JupyterFrontEndPlugin<void> = {
     palette: ICommandPalette | null
   ): Promise<void> => {
     const progression = new ProgressionPanel();
+    const attachedNotebooks = new WeakSet<NotebookPanel>();
     app.shell.add(progression, 'right', { rank: 900 });
 
     app.commands.addCommand(EXPORT_COMMAND, {
@@ -251,6 +263,7 @@ const plugin: JupyterFrontEndPlugin<void> = {
         try {
           const result = await requestJson<ExportResult>('export', {
             method: 'POST',
+            headers: JSON_HEADERS,
             body: '{}'
           });
           progression.setNotice(`Evidence exported: ${result.path}`);
@@ -266,6 +279,11 @@ const plugin: JupyterFrontEndPlugin<void> = {
     palette?.addItem({ command: EXPORT_COMMAND, category: 'FreeBSD Laboratory' });
 
     const attachNotebook = async (panel: NotebookPanel): Promise<void> => {
+      if (attachedNotebooks.has(panel)) {
+        return;
+      }
+      attachedNotebooks.add(panel);
+
       await panel.revealed;
       await panel.context.ready;
 
