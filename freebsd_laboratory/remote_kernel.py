@@ -237,14 +237,14 @@ class LocalPortLeasePool:
                 lock_fd = os.open(
                     lock_path,
                     os.O_CREAT | os.O_EXCL | os.O_RDWR,
-                    0o660,
+                    0o600,
                 )
                 created = True
             except FileExistsError:
                 lock_fd = os.open(lock_path, os.O_RDWR)
             try:
                 if created:
-                    os.fchmod(lock_fd, 0o660)
+                    os.fchmod(lock_fd, 0o600)
                 fcntl.flock(lock_fd, fcntl.LOCK_EX)
                 try:
                     yield
