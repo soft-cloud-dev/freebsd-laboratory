@@ -1,0 +1,11 @@
+{
+  "extends": "@jupyterlab/builder/lib/tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "lib",
+    "declaration": true,
+    "sourceMap": true,
+    "noEmitOnError": true
+  },
+  "include": ["src/**/*"]
+}

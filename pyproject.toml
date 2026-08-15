@@ -1,0 +1,48 @@
+[build-system]
+requires = ["setuptools>=77", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "freebsd-laboratory"
+version = "0.1.0"
+description = "Governed executable FreeBSD documentation for JupyterLab"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "BSD-2-Clause"
+authors = [
+  { name = "Software Cloud" }
+]
+dependencies = [
+  "jupyter-client>=8.6,<9",
+  "jupyter-server>=2.15,<3",
+  "jupyterlab>=4.3,<5",
+  "PyYAML>=6,<7",
+  "traitlets>=5.14,<6"
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8,<9",
+  "ruff>=0.12,<1"
+]
+
+[project.scripts]
+freebsd-lab-install-kernel = "freebsd_laboratory.install:main"
+
+[project.entry-points."jupyter_client.kernel_provisioners"]
+freebsd-jail-provisioner = "freebsd_laboratory.provisioner:FreeBSDJailProvisioner"
+
+[tool.setuptools.packages.find]
+include = ["freebsd_laboratory*"]
+
+[tool.setuptools.package-data]
+freebsd_laboratory = [
+  "kernels/freebsd-python/kernel.json"
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
