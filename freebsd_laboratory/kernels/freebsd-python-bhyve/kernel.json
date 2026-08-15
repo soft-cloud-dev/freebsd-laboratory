@@ -13,15 +13,10 @@
     "kernel_provisioner": {
       "provisioner_name": "freebsd-bhyve-provisioner",
       "config": {
-        "vm_template": "freebsd-lab",
-        "vm_image": "freebsd-python.raw",
-        "network_cidr": "172.31.254.0/24",
-        "address_start": "172.31.254.100",
-        "address_end": "172.31.254.199",
-        "network_interface": "vtnet0",
+        "runtime_socket": "/var/run/freebsd-laboratory/runtime.sock",
         "ssh_user": "freebsd",
         "ssh_private_key": "/usr/local/etc/freebsd-laboratory/id_ed25519",
-        "ssh_public_key": "/usr/local/etc/freebsd-laboratory/id_ed25519.pub"
+        "startup_timeout": 90
       }
     }
   }

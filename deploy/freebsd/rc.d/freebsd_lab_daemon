@@ -1,0 +1,69 @@
+#!/bin/sh
+
+# PROVIDE: freebsd_lab_daemon
+# REQUIRE: LOGIN
+# KEYWORD: shutdown
+
+. /etc/rc.subr
+
+name="freebsd_lab_daemon"
+rcvar="${name}_enable"
+desc="FreeBSD Laboratory privileged runtime lifecycle daemon"
+
+load_rc_config "$name"
+
+: ${freebsd_lab_daemon_enable:="NO"}
+: ${freebsd_lab_daemon_program:="/usr/local/bin/freebsd-lab-runtime-daemon"}
+: ${freebsd_lab_daemon_pidfile:="/var/run/freebsd-laboratory/runtime-daemon.pid"}
+: ${freebsd_lab_daemon_socket:="/var/run/freebsd-laboratory/runtime.sock"}
+: ${freebsd_lab_daemon_group:="freebsdlab"}
+: ${freebsd_lab_daemon_network:="172.31.254.0/24"}
+: ${freebsd_lab_daemon_host_address:="172.31.254.1"}
+: ${freebsd_lab_daemon_address_start:="172.31.254.10"}
+: ${freebsd_lab_daemon_address_end:="172.31.254.199"}
+: ${freebsd_lab_daemon_bridge:="labbridge0"}
+: ${freebsd_lab_daemon_configure_bridge_filter:="YES"}
+: ${freebsd_lab_daemon_runtime_args:=""}
+
+pidfile="${freebsd_lab_daemon_pidfile}"
+command="/usr/sbin/daemon"
+procname="/usr/sbin/daemon"
+required_modules="if_bridge if_epair"
+start_precmd="${name}_prestart"
+start_postcmd="${name}_poststart"
+
+freebsd_lab_daemon_prestart()
+{
+    if ! /usr/sbin/pw groupshow "${freebsd_lab_daemon_group}" >/dev/null 2>&1; then
+        err 1 "Required group ${freebsd_lab_daemon_group} does not exist"
+    fi
+    if [ ! -x "${freebsd_lab_daemon_program}" ]; then
+        err 1 "Runtime daemon is not executable: ${freebsd_lab_daemon_program}"
+    fi
+
+    /usr/bin/install -d -o root -g "${freebsd_lab_daemon_group}" -m 0750 \
+        /var/run/freebsd-laboratory
+    /usr/bin/install -d -o root -g wheel -m 0700 \
+        /var/db/freebsd-laboratory
+}
+
+freebsd_lab_daemon_poststart()
+{
+    if checkyesno freebsd_lab_daemon_configure_bridge_filter; then
+        /sbin/sysctl net.link.bridge.pfil_bridge=1 >/dev/null || return 1
+        /sbin/sysctl net.link.bridge.pfil_member=0 >/dev/null || return 1
+    fi
+}
+
+command_args="-f -P ${pidfile} -S -T ${name} \
+${freebsd_lab_daemon_program} \
+--socket=${freebsd_lab_daemon_socket} \
+--group=${freebsd_lab_daemon_group} \
+--network=${freebsd_lab_daemon_network} \
+--host-address=${freebsd_lab_daemon_host_address} \
+--address-start=${freebsd_lab_daemon_address_start} \
+--address-end=${freebsd_lab_daemon_address_end} \
+--bridge=${freebsd_lab_daemon_bridge} \
+${freebsd_lab_daemon_runtime_args}"
+
+run_rc_command "$1"

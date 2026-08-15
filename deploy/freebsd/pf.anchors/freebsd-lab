@@ -1,0 +1,16 @@
+# FreeBSD Laboratory host-isolation anchor.
+#
+# The host initiates SSH and Jupyter kernel connections to laboratory runtimes.
+# PF state permits replies to those host-originated sessions. New inbound IPv4
+# sessions from a jail or bhyve guest are blocked on the host-only bridge.
+
+lab_if = "labbridge0"
+lab_net = "172.31.254.0/24"
+lab_host = "172.31.254.1"
+
+# Add narrowly scoped guest-to-host exceptions above the final block if a lab
+# intentionally consumes a host service. For example:
+# pass in quick on $lab_if inet proto udp from $lab_net to $lab_host port 53 keep state
+
+pass out quick on $lab_if inet from $lab_host to $lab_net keep state
+block in log quick on $lab_if inet all

@@ -1,0 +1,12 @@
+# Merge these settings into /etc/rc.conf.
+#
+# FreeBSD creates if_bridge instances through the bridge<N> cloner. bridge0 is
+# renamed to the stable laboratory name so PF and the runtime daemon can refer
+# to labbridge0. If bridge0 is already in use, choose another unused bridge<N>
+# and adjust the two bridge0 variable names below.
+
+cloned_interfaces="${cloned_interfaces} bridge0"
+ifconfig_bridge0_name="labbridge0"
+ifconfig_labbridge0="inet 172.31.254.1/24 up"
+freebsd_lab_daemon_enable="YES"
+pf_enable="YES"

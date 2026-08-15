@@ -6,16 +6,17 @@
     "-f",
     "{connection_file}"
   ],
-  "display_name": "FreeBSD (Python 3)",
+  "display_name": "FreeBSD (Python 3, VNET jail)",
   "language": "python",
-  "interrupt_mode": "signal",
+  "interrupt_mode": "message",
   "metadata": {
     "kernel_provisioner": {
       "provisioner_name": "freebsd-jail-provisioner",
       "config": {
-        "template_snapshot": "zroot/jails/templates/freebsd-python@clean",
-        "dataset_parent": "zroot/jails/containers",
-        "mount_root": "/usr/local/jails/containers"
+        "runtime_socket": "/var/run/freebsd-laboratory/runtime.sock",
+        "ssh_user": "freebsd",
+        "ssh_private_key": "/usr/local/etc/freebsd-laboratory/id_ed25519",
+        "startup_timeout": 30
       }
     }
   }

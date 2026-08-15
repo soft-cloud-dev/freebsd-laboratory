@@ -18,6 +18,7 @@ jobs:
       - run: python -m pip install --upgrade pip
       - run: python -m pip install -e ".[dev]"
       - run: python -m compileall -q freebsd_laboratory tests
+      - run: sh -n deploy/freebsd/rc.d/freebsd_lab_daemon
       - run: pytest -q
 
   labextension:

@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import platform
 from pathlib import Path
 
 from jupyter_server.extension.application import ExtensionApp
-from traitlets import Unicode
+from traitlets import Bool, Unicode
 
 from .handlers import ExportHandler, EventHandler, SERVICE_SETTINGS_KEY, StateHandler
+from .runtime_client import DEFAULT_RUNTIME_SOCKET, RuntimeClient, RuntimeControlError
 from .service import LabService
 
 
@@ -22,9 +24,29 @@ class FreeBSDLaboratoryApp(ExtensionApp):
         ".freebsd-lab/evidence",
         help="Directory used for server-owned evidence sessions.",
     ).tag(config=True)
+    runtime_socket = Unicode(
+        DEFAULT_RUNTIME_SOCKET,
+        help="Unix-domain socket exposed by freebsd-lab-runtime-daemon.",
+    ).tag(config=True)
+    reconcile_runtimes_on_start = Bool(
+        True,
+        help="Ask the runtime daemon to remove stale runtimes whose owner PID no longer exists.",
+    ).tag(config=True)
 
     def initialize_settings(self) -> None:
         assert self.serverapp is not None
+        if self.reconcile_runtimes_on_start and platform.system() == "FreeBSD":
+            try:
+                result = RuntimeClient(self.runtime_socket).gc(stale_only=True)
+                cleaned = result.get("cleaned", [])
+                if cleaned:
+                    self.log.warning(
+                        "FreeBSD Laboratory reconciled stale runtimes: %s",
+                        ", ".join(str(item) for item in cleaned),
+                    )
+            except RuntimeControlError as error:
+                self.log.warning("FreeBSD Laboratory runtime reconciliation skipped: %s", error)
+
         service = LabService(
             root_dir=Path(self.serverapp.root_dir),
             lab_path=self.lab_path,
