@@ -90,8 +90,20 @@ Rebuild both artifacts whenever one of these changes:
 
 Treat the source revision, package audit result, embedded image manifest and external SHA-256 file as release evidence. Keep the previous known-good artifacts until the new pair has completed a real VNET-jail and bhyve smoke test.
 
-## CI runner
+## CI boundary
 
-`.github/workflows/freebsd-images.yml` is a manual workflow for a dedicated self-hosted FreeBSD image builder. It intentionally does not run on normal pull requests because building world, ZFS snapshots and raw VM images requires a privileged FreeBSD host with local storage.
+The normal GitHub Actions workflow runs portable Python/TypeScript tests and shell syntax checks for every builder script. Full image construction is deliberately not attached to pull requests: it requires a privileged FreeBSD builder with ZFS and enough local storage to build world and raw VM images.
 
-The ordinary Linux test workflow still syntax-checks all builder scripts so shell regressions are caught before the FreeBSD job is invoked.
+GitHub's official Actions runner application does not currently list FreeBSD as a supported self-hosted runner OS. Integrate `build-golden-images.sh` with a FreeBSD-capable CI system, or invoke it remotely from an approved CI controller, rather than pretending an Ubuntu runner validates the actual image lifecycle.
+
+The release gate for an activated image pair is therefore:
+
+```text
+portable CI green
+  -> build on dedicated FreeBSD host
+  -> pkg audit passes
+  -> record source revision + hashes
+  -> real VNET jail smoke test
+  -> real bhyve smoke test
+  -> activate versioned artifacts
+```
