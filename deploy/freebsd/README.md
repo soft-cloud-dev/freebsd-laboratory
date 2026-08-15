@@ -1,6 +1,6 @@
 # FreeBSD host deployment
 
-This directory contains host-side deployment references for the privileged runtime daemon, persistent laboratory bridge, PF host-isolation policy, and rebuildable FreeBSD golden images.
+This directory contains host-side deployment references for the privileged runtime daemon, persistent laboratory bridge, PF host-isolation policy, collision-safe SSH tunnel ports, and rebuildable FreeBSD golden images.
 
 ## rc.d service
 
@@ -23,6 +23,17 @@ host address:  172.31.254.1
 address pool:  172.31.254.10-172.31.254.199
 bridge:        labbridge0
 ```
+
+The service also creates the shared tunnel-port lease directory:
+
+```text
+/var/run/freebsd-laboratory/tunnel-port-leases
+owner: root
+ group: freebsdlab
+ mode: 2770
+```
+
+The setgid directory gives every authorized Jupyter process the same host-wide coordination namespace without granting access outside the existing `freebsdlab` operator group.
 
 Merge the relevant settings from `deploy/freebsd/rc.conf.snippet` into `/etc/rc.conf`. The sample creates an ordinary `bridge0` clone and immediately renames it to the stable name `labbridge0`; if `bridge0` is already in use, select another unused `bridge<N>` clone and adjust the corresponding variable names. Creating the named bridge through the normal network startup path makes `labbridge0` available before PF loads its interface-bound anchor.
 
@@ -58,23 +69,37 @@ The rc.d service reasserts the same values after loading `if_bridge`.
 
 ## PF host-isolation policy
 
-The laboratory bridge has no physical uplink, but the host intentionally owns `172.31.254.1` on `labbridge0`. The transport is now SSH-only at the L3/L4 boundary: Jupyter's shell, IOPub, stdin, control and heartbeat TCP channels bind to loopback in each runtime and are carried through SSH local forwards.
+The laboratory bridge has no physical uplink, but the host intentionally owns `172.31.254.1` on `labbridge0`. The transport is SSH-only at the L3/L4 boundary: Jupyter's shell, IOPub, stdin, control and heartbeat TCP channels bind to loopback in each runtime and are carried through SSH local forwards.
 
-Install the anchor:
+Install the anchor file:
 
 ```sh
 install -d -m 0755 /usr/local/etc/pf.anchors
 install -m 0644 deploy/freebsd/pf.anchors/freebsd-lab /usr/local/etc/pf.anchors/freebsd-lab
 ```
 
-Merge the two lines from `deploy/freebsd/pf.conf.snippet` into `/etc/pf.conf`. Keep the laboratory anchor before any broad `quick` pass rule that would otherwise accept traffic on `labbridge0`.
+**Installing the anchor file alone does not activate it.** The host's main `/etc/pf.conf` must contain both declarations from `deploy/freebsd/pf.conf.snippet`:
 
-Validate the complete PF configuration before replacing the active ruleset:
+```pf
+anchor "freebsd-lab" on labbridge0
+load anchor "freebsd-lab" from "/usr/local/etc/pf.anchors/freebsd-lab"
+```
+
+The `anchor` rule is the point at which PF evaluates the laboratory filter rules; the `load anchor` line populates that anchor from the repository policy file. Keep these declarations before any broad `quick` pass rule that would otherwise accept traffic on `labbridge0`.
+
+Validate the complete configuration first, then explicitly reload the main ruleset so the anchor becomes active:
 
 ```sh
 pfctl -nf /etc/pf.conf
 pfctl -f /etc/pf.conf
 pfctl -a freebsd-lab -sr
+```
+
+The repository also provides a fail-closed helper. Its default mode checks syntax and both required main-ruleset references without changing the live firewall; `--reload` performs the reload and then verifies that the active anchor contains filter rules:
+
+```sh
+deploy/freebsd/validate-pf.sh check
+deploy/freebsd/validate-pf.sh --reload
 ```
 
 If PF is not already enabled, enable it before relying on this boundary:
@@ -98,6 +123,25 @@ SSH reply traffic:                     allowed by PF state
 Consequently, a runtime cannot initiate a connection to the host's SSH daemon, database, NFS service, Jupyter HTTP endpoint, or another routed destination through this interface. The host also cannot silently start depending on direct Jupyter ZMQ ports because only runtime TCP/22 is allowed outbound on `labbridge0`.
 
 Add a narrowly scoped exception only when a laboratory has an explicit host-service dependency. The sample covers IPv4; an IPv6 runtime transport needs a separate policy.
+
+## SSH tunnel port allocation
+
+The provisioners do not reuse Jupyter's original random connection ports directly. Before staging the connection file, they allocate five host-side ports from a shared configurable pool. Defaults are:
+
+```text
+lease directory: /var/run/freebsd-laboratory/tunnel-port-leases
+port range:      30000-44999
+ports/session:   5
+bind address:    127.0.0.1
+```
+
+Allocation is serialized by `flock(2)` on the shared lease directory. Each candidate port is also actually bound on `127.0.0.1` before it is accepted, so ports already owned by the host are skipped. The five reservation sockets stay open throughout runtime creation, SSH readiness checks, connection-file rewriting, and SCP staging.
+
+Immediately before `LocalProvisioner.launch_kernel()` starts OpenSSH, those reservation sockets are closed so `ssh -L` can acquire the listeners. The lease files remain owned by that kernel until cleanup. This prevents a second FreeBSD Laboratory kernel—whether launched concurrently in the same Jupyter process or by another authorized Jupyter process—from selecting any of the five ports during the handoff or while the SSH tunnel is alive.
+
+The guarantee covers cooperating FreeBSD Laboratory sessions that share this lease directory. An unrelated host process can still race to bind a port after the reservation socket is handed to OpenSSH; `ExitOnForwardFailure=yes` makes that exceptional race fail kernel startup rather than silently attaching to the wrong listener.
+
+The port range and lease directory are traitlet-backed provisioner settings (`tunnel_port_start`, `tunnel_port_end`, `tunnel_lease_dir`) and can be overridden per kernelspec for a host with a reserved local service range.
 
 ## Golden image lifecycle
 
@@ -155,10 +199,13 @@ deploy/freebsd/pf.anchors/freebsd-lab
     SSH-only laboratory host-isolation rules
 
 deploy/freebsd/pf.conf.snippet
-    anchor declarations for /etc/pf.conf
+    mandatory anchor declarations for /etc/pf.conf
+
+deploy/freebsd/validate-pf.sh
+    syntax/reference check and explicit PF reload verification helper
 
 deploy/freebsd/images/
     reproducible jail and bhyve golden-image builders
 ```
 
-The Linux GitHub Actions workflow syntax-checks the rc.d and image-builder shell assets and runs portable unit tests. Real `rcorder`, `pfctl`, ZFS, VNET, bhyve and golden-image build validation must execute on a dedicated FreeBSD environment; GitHub's official Actions runner application does not currently support FreeBSD as a self-hosted runner OS.
+The Linux GitHub Actions workflow syntax-checks the rc.d, PF helper, and image-builder shell assets and runs portable unit tests. Real `rcorder`, `pfctl`, ZFS, VNET, bhyve and golden-image build validation must execute on a dedicated FreeBSD environment; GitHub's official Actions runner application does not currently support FreeBSD as a self-hosted runner OS.
