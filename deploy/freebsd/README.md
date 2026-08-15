@@ -24,7 +24,7 @@ address pool:  172.31.254.10-172.31.254.199
 bridge:        labbridge0
 ```
 
-Merge the relevant settings from `deploy/freebsd/rc.conf.snippet` into `/etc/rc.conf`. Do not overwrite an existing `cloned_interfaces` value; append `labbridge0` to it. Creating the bridge through the normal network startup path makes `labbridge0` available before PF loads its interface-bound anchor.
+Merge the relevant settings from `deploy/freebsd/rc.conf.snippet` into `/etc/rc.conf`. The sample creates an ordinary `bridge0` clone and immediately renames it to the stable name `labbridge0`; if `bridge0` is already in use, select another unused `bridge<N>` clone and adjust the corresponding variable names. Creating the named bridge through the normal network startup path makes `labbridge0` available before PF loads its interface-bound anchor.
 
 Service-specific values can be overridden through `/etc/rc.conf`. For example:
 
@@ -120,7 +120,7 @@ deploy/freebsd/rc.d/freebsd_lab_daemon
     rc.d service installed as /usr/local/etc/rc.d/freebsd_lab_daemon
 
 deploy/freebsd/rc.conf.snippet
-    persistent labbridge0, daemon enablement, and PF enablement reference
+    persistent bridge clone/rename, daemon enablement, and PF enablement reference
 
 deploy/freebsd/sysctl.kld.d/if_bridge.conf
     module-specific bridge pfil defaults
