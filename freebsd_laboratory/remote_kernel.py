@@ -11,6 +11,15 @@ from pathlib import Path
 from typing import Any, Sequence
 
 
+CONNECTION_PORT_FIELDS = (
+    "shell_port",
+    "iopub_port",
+    "stdin_port",
+    "control_port",
+    "hb_port",
+)
+
+
 def executable_exists(command: str) -> bool:
     if os.path.isabs(command):
         return Path(command).is_file() and os.access(command, os.X_OK)
@@ -40,21 +49,47 @@ def remote_kernel_command(
     return result
 
 
-def rewrite_connection_file(parent: Any, guest_ip: str) -> tuple[Path, str]:
+def connection_ports(document: dict[str, Any]) -> tuple[int, ...]:
+    ports: list[int] = []
+    for field in CONNECTION_PORT_FIELDS:
+        value = document.get(field)
+        if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= 65535:
+            raise ValueError(f"Invalid Jupyter connection port: {field}")
+        ports.append(value)
+    if len(set(ports)) != len(ports):
+        raise ValueError("Jupyter connection ports must be unique")
+    return tuple(ports)
+
+
+def rewrite_connection_file(
+    parent: Any,
+    bind_ip: str = "127.0.0.1",
+) -> tuple[Path, str, tuple[int, ...]]:
+    """Bind the host and remote kernel documents to loopback for SSH forwarding.
+
+    Jupyter keeps using its original random TCP ports, but those ports are bound
+    locally by the SSH client and forwarded to the same loopback ports inside the
+    jail/VM. The guest therefore exposes only SSH on the laboratory bridge.
+    """
+
     connection_file = getattr(parent, "connection_file", None)
     if not connection_file:
         raise RuntimeError("Kernel manager connection file is unavailable")
     host_path = Path(connection_file).resolve()
     document = json.loads(host_path.read_text(encoding="utf-8"))
+    if document.get("transport", "tcp") != "tcp":
+        raise ValueError("SSH kernel transport requires Jupyter TCP connections")
+
+    ports = connection_ports(document)
     original_ip = str(document.get("ip", getattr(parent, "ip", "")))
-    document["ip"] = guest_ip
-    setattr(parent, "ip", guest_ip)
+    document["ip"] = bind_ip
+    setattr(parent, "ip", bind_ip)
 
     temporary = host_path.with_name(f".{host_path.name}.remote.tmp")
     temporary.write_text(json.dumps(document, indent=2) + "\n", encoding="utf-8")
     temporary.chmod(0o600)
     temporary.replace(host_path)
-    return host_path, original_ip
+    return host_path, original_ip, ports
 
 
 def restore_connection_file(parent: Any, original_ip: str | None) -> None:
@@ -84,7 +119,12 @@ class SSHTransport:
     known_hosts_file: Path
     ssh_command: str = "/usr/bin/ssh"
     scp_command: str = "/usr/bin/scp"
-    connect_timeout: int = 3
+    connect_timeout: int = 5
+    connection_attempts: int = 3
+    server_alive_interval: int = 15
+    server_alive_count_max: int = 4
+    tcp_keep_alive: bool = True
+    bind_address: str = "127.0.0.1"
 
     def assert_available(self) -> None:
         for command in (self.ssh_command, self.scp_command):
@@ -108,13 +148,39 @@ class SSHTransport:
             "-o",
             f"ConnectTimeout={self.connect_timeout}",
             "-o",
+            f"ConnectionAttempts={self.connection_attempts}",
+            "-o",
+            f"ServerAliveInterval={self.server_alive_interval}",
+            "-o",
+            f"ServerAliveCountMax={self.server_alive_count_max}",
+            "-o",
+            f"TCPKeepAlive={'yes' if self.tcp_keep_alive else 'no'}",
+            "-o",
+            "ExitOnForwardFailure=yes",
+            "-o",
             "StrictHostKeyChecking=accept-new",
             "-o",
             f"UserKnownHostsFile={self.known_hosts_file}",
         ]
 
-    def command(self, remote_command: str) -> list[str]:
-        return [self.ssh_command, *self.options(), self.target, remote_command]
+    def command(
+        self,
+        remote_command: str,
+        *,
+        forward_ports: Sequence[int] = (),
+    ) -> list[str]:
+        command = [self.ssh_command, *self.options(), "-T"]
+        for port in sorted(set(forward_ports)):
+            if isinstance(port, bool) or not isinstance(port, int) or not 1 <= port <= 65535:
+                raise ValueError("Invalid SSH forwarding port")
+            command.extend(
+                [
+                    "-L",
+                    f"{self.bind_address}:{port}:127.0.0.1:{port}",
+                ]
+            )
+        command.extend([self.target, remote_command])
+        return command
 
     @staticmethod
     def _run(
@@ -141,8 +207,9 @@ class SSHTransport:
     def wait_until_ready(self, timeout: int) -> None:
         deadline = time.monotonic() + timeout
         last_detail = "SSH did not become ready"
+        probe_timeout = max(5, self.connect_timeout + 2)
         while time.monotonic() < deadline:
-            result = self._run(self.command("true"), check=False, timeout=5)
+            result = self._run(self.command("true"), check=False, timeout=probe_timeout)
             if result.returncode == 0:
                 return
             last_detail = result.stderr.strip() or result.stdout.strip() or last_detail
