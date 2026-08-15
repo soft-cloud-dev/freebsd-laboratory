@@ -438,6 +438,7 @@ class FreeBSDBhyveProvisioner(LocalProvisioner):
         try:
             await super().cleanup(restart=restart)
         finally:
+            self._restore_connection_ip()
             await asyncio.to_thread(self._destroy_runtime)
 
     async def get_provisioner_info(self) -> dict[str, Any]:
@@ -451,6 +452,7 @@ class FreeBSDBhyveProvisioner(LocalProvisioner):
                 ),
                 "vm_created": self._vm_created,
                 "lease_acquired": self._lease_acquired,
+                "original_connection_ip": self._original_connection_ip,
             }
         )
         return info
@@ -463,3 +465,4 @@ class FreeBSDBhyveProvisioner(LocalProvisioner):
         self.known_hosts_file = Path(known_hosts_file) if known_hosts_file else None
         self._vm_created = bool(provisioner_info.get("vm_created"))
         self._lease_acquired = bool(provisioner_info.get("lease_acquired"))
+        self._original_connection_ip = provisioner_info.get("original_connection_ip")
