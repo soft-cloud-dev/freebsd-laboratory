@@ -56,6 +56,7 @@ BUILT_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 cleanup_failed_build()
 {
     status=$?
+    trap - EXIT HUP INT TERM
     if [ "$status" -ne 0 ] && zfs list -H -o name "$DATASET" >/dev/null 2>&1; then
         zfs destroy -r "$DATASET" >/dev/null 2>&1 || true
     fi
