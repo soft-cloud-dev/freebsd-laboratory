@@ -1,11 +1,16 @@
 from __future__ import annotations
 
 import json
+import os
+import socket
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from threading import Barrier
 
 import pytest
 
 from freebsd_laboratory.remote_kernel import (
+    LocalPortLeasePool,
     SSHTransport,
     connection_ports,
     restore_connection_file,
@@ -26,6 +31,8 @@ class Parent:
     def __init__(self, connection_file: Path) -> None:
         self.connection_file = str(connection_file)
         self.ip = "0.0.0.0"
+        for field_name, port in PORTS.items():
+            setattr(self, field_name, port)
 
 
 def write_connection_file(path: Path) -> None:
@@ -39,6 +46,28 @@ def write_connection_file(path: Path) -> None:
     path.write_text(json.dumps(document), encoding="utf-8")
 
 
+def find_free_range(count: int) -> tuple[int, int]:
+    for base in range(20000, 59000, max(count, 32)):
+        sockets: list[socket.socket] = []
+        available = True
+        try:
+            for port in range(base, base + count):
+                reserved_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                try:
+                    reserved_socket.bind(("127.0.0.1", port))
+                except OSError:
+                    reserved_socket.close()
+                    available = False
+                    break
+                sockets.append(reserved_socket)
+        finally:
+            for reserved_socket in sockets:
+                reserved_socket.close()
+        if available:
+            return base, base + count - 1
+    raise RuntimeError("Unable to find a free TCP range for test")
+
+
 def test_connection_ports_requires_complete_unique_tcp_ports() -> None:
     assert connection_ports(PORTS) == tuple(PORTS.values())
 
@@ -48,23 +77,92 @@ def test_connection_ports_requires_complete_unique_tcp_ports() -> None:
         connection_ports(invalid)
 
 
-def test_connection_file_is_loopback_bound_for_ssh_tunnel(tmp_path: Path) -> None:
+def test_connection_file_is_rewritten_to_leased_loopback_ports(tmp_path: Path) -> None:
     path = tmp_path / "kernel.json"
     write_connection_file(path)
     parent = Parent(path)
+    leased_ports = (52001, 52002, 52003, 52004, 52005)
 
-    host_path, original_ip, ports = rewrite_connection_file(parent)
+    host_path, original_ip, original_ports, tunnel_ports = rewrite_connection_file(
+        parent,
+        ports=leased_ports,
+    )
 
     document = json.loads(host_path.read_text(encoding="utf-8"))
     assert document["ip"] == "127.0.0.1"
     assert parent.ip == "127.0.0.1"
     assert original_ip == "0.0.0.0"
-    assert ports == tuple(PORTS.values())
+    assert original_ports == tuple(PORTS.values())
+    assert tunnel_ports == leased_ports
+    for field_name, port in zip(PORTS, leased_ports, strict=True):
+        assert document[field_name] == port
+        assert getattr(parent, field_name) == port
 
-    restore_connection_file(parent, original_ip)
+    restore_connection_file(parent, original_ip, original_ports)
     restored = json.loads(path.read_text(encoding="utf-8"))
     assert restored["ip"] == "0.0.0.0"
     assert parent.ip == "0.0.0.0"
+    for field_name, port in PORTS.items():
+        assert restored[field_name] == port
+        assert getattr(parent, field_name) == port
+
+
+def test_port_pool_prevents_concurrent_session_collisions(tmp_path: Path) -> None:
+    session_count = 12
+    ports_per_session = 5
+    start, end = find_free_range(128)
+    pool = LocalPortLeasePool(start, end, tmp_path / "leases")
+    barrier = Barrier(session_count)
+
+    def allocate(index: int):
+        barrier.wait()
+        return pool.allocate(f"session-{index}", os.getpid(), ports_per_session)
+
+    with ThreadPoolExecutor(max_workers=session_count) as executor:
+        reservations = list(executor.map(allocate, range(session_count)))
+
+    all_ports = [port for reservation in reservations for port in reservation.ports]
+    assert len(all_ports) == session_count * ports_per_session
+    assert len(set(all_ports)) == len(all_ports)
+
+    # Simulate the launch handoff: the pre-bound sockets are closed immediately
+    # before OpenSSH binds, but the process-wide lease remains authoritative.
+    for reservation in reservations:
+        reservation.release_reservations()
+
+    extra = pool.allocate("session-extra", os.getpid(), ports_per_session)
+    assert set(extra.ports).isdisjoint(all_ports)
+
+    extra.release()
+    for reservation in reservations:
+        reservation.release()
+
+
+def test_port_pool_skips_ports_already_owned_by_host_process(tmp_path: Path) -> None:
+    start, end = find_free_range(32)
+    occupied = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    occupied.bind(("127.0.0.1", start))
+    occupied.listen(1)
+    try:
+        reservation = LocalPortLeasePool(start, end, tmp_path / "leases").allocate(
+            "session-a",
+            os.getpid(),
+            5,
+        )
+        assert start not in reservation.ports
+        reservation.release()
+    finally:
+        occupied.close()
+
+
+def test_port_pool_lock_is_group_writable(tmp_path: Path) -> None:
+    start, end = find_free_range(16)
+    pool = LocalPortLeasePool(start, end, tmp_path / "leases")
+    reservation = pool.allocate("session-a", os.getpid(), 5)
+    try:
+        assert (pool.directory / ".lock").stat().st_mode & 0o660 == 0o660
+    finally:
+        reservation.release()
 
 
 def test_ssh_transport_forwards_all_kernel_ports_with_keepalives(tmp_path: Path) -> None:
