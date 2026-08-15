@@ -8,7 +8,7 @@
   ],
   "display_name": "FreeBSD (Python 3, bhyve)",
   "language": "python",
-  "interrupt_mode": "signal",
+  "interrupt_mode": "message",
   "metadata": {
     "kernel_provisioner": {
       "provisioner_name": "freebsd-bhyve-provisioner",
