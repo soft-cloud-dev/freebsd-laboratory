@@ -22,6 +22,7 @@ LAB_VM_PACKAGES=${LAB_VM_PACKAGES:-"python311 py311-ipykernel py311-cloud-init"}
 LAB_PKG_REPOS_DIR=${LAB_PKG_REPOS_DIR:-}
 LAB_FAIL_ON_PKG_AUDIT=${LAB_FAIL_ON_PKG_AUDIT:-YES}
 VM_IMAGE_CONFIG=${VM_IMAGE_CONFIG:-${SCRIPT_DIR}/vmimage.conf}
+LAB_SSHD_POLICY=${LAB_SSHD_POLICY:-${SCRIPT_DIR}/sshd-freebsd-lab.conf}
 
 for command in git make sha256 install grep; do
     if ! command -v "$command" >/dev/null 2>&1; then
@@ -36,6 +37,10 @@ if [ ! -f "${SRC_DIR}/release/Makefile" ] || [ ! -f "${SRC_DIR}/release/Makefile
 fi
 if [ ! -f "$VM_IMAGE_CONFIG" ]; then
     echo "VM image configuration not found: $VM_IMAGE_CONFIG" >&2
+    exit 1
+fi
+if [ ! -f "$LAB_SSHD_POLICY" ]; then
+    echo "Laboratory SSH policy not found: $LAB_SSHD_POLICY" >&2
     exit 1
 fi
 if ! grep -q 'VM_IMAGE_CONFIG' "${SRC_DIR}/release/Makefile.vm"; then
@@ -57,7 +62,8 @@ set -- \
     LAB_SOURCE_BRANCH="$SOURCE_BRANCH" \
     LAB_SOURCE_REVISION="$SOURCE_REVISION" \
     LAB_VM_PACKAGES="$LAB_VM_PACKAGES" \
-    LAB_FAIL_ON_PKG_AUDIT="$LAB_FAIL_ON_PKG_AUDIT"
+    LAB_FAIL_ON_PKG_AUDIT="$LAB_FAIL_ON_PKG_AUDIT" \
+    LAB_SSHD_POLICY="$LAB_SSHD_POLICY"
 
 if [ -n "$LAB_PKG_REPOS_DIR" ]; then
     set -- "$@" PKG_REPOS_DIR="$LAB_PKG_REPOS_DIR"
