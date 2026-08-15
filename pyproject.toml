@@ -21,13 +21,20 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+signing = [
+  "cryptography>=45,<47"
+]
 dev = [
+  "cryptography>=45,<47",
   "pytest>=8,<9",
   "ruff>=0.12,<1"
 ]
 
 [project.scripts]
 freebsd-lab-install-kernel = "freebsd_laboratory.install:main"
+freebsd-lab-runtime-daemon = "freebsd_laboratory.runtime_daemon:main"
+freebsd-lab-gc = "freebsd_laboratory.gc:main"
+freebsd-lab-verify-evidence = "freebsd_laboratory.verify:main"
 
 [project.entry-points."jupyter_client.kernel_provisioners"]
 freebsd-jail-provisioner = "freebsd_laboratory.provisioner:FreeBSDJailProvisioner"
