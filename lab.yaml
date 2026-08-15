@@ -1,0 +1,38 @@
+schema: softcloud.lab/v1
+id: freebsd-intro
+title: FreeBSD Laboratory
+
+runtime:
+  os: freebsd
+  release: "14.1"
+  architecture: amd64
+
+executor:
+  type: jail
+  ephemeral: true
+
+notebook: notebooks/Intro.ipynb
+
+checks:
+  - id: kernel
+    command: sysctl -n kern.ostype
+    expect:
+      stdout: FreeBSD
+  - id: release
+    command: freebsd-version
+
+evidence:
+  commands: true
+  stdout: true
+  stderr: true
+  environment: true
+  hashes: true
+
+stages:
+  - observed
+  - explained
+  - reproduced
+  - modified
+  - verified
+  - recovered
+  - designed
