@@ -16,8 +16,8 @@ Jupyter Server (unprivileged)
   |-- evidence manifest / optional signature
   |
   | Jupyter kernel provisioner
-  |   |-- connection-file IP rebind
-  |   |-- SSH/SCP kernel transport
+  |   |-- loopback connection-file rebind
+  |   |-- SSH/SCP + 5 local TCP forwards
   |   `-- Unix socket lifecycle requests
   |               |
   |               v
@@ -29,21 +29,24 @@ Jupyter Server (unprivileged)
   |               |
   |         private labbridge0
   |          172.31.254.0/24
+  |          PF: host -> guest TCP/22 only
   |          no physical uplink
   |          /             \
   |         /               \
   v        v                 v
 SSH    VNET jail          bhyve VM
        Python/ipykernel   FreeBSD + Python/ipykernel
+       loopback ZMQ       loopback ZMQ
 ```
 
 ## Trust and privilege boundaries
 
-There are three distinct trust boundaries:
+There are four independent boundaries:
 
 1. **Browser observation boundary.** JupyterLab can report notebook context and cell execution observations, but browser-originated requests cannot assert machine-only trust stages.
-2. **Jupyter evidence boundary.** Jupyter Server owns the append-only evidence stream and the exported manifest. It runs without privileges to create jails, VMs, ZFS datasets, epairs, or bridges.
+2. **Jupyter evidence boundary.** Jupyter Server owns the append-only evidence stream and exported manifest. It runs without privileges to create jails, VMs, ZFS datasets, epairs, or bridges.
 3. **Runtime lifecycle boundary.** `freebsd-lab-runtime-daemon` is root-owned and listens on a local Unix-domain socket. It accepts a fixed set of structured lifecycle operations instead of arbitrary shell commands.
+4. **Runtime network boundary.** The host communicates with laboratory runtimes only through SSH on the private bridge. Jupyter's five TCP channels remain loopback-only and are tunneled through that SSH session.
 
 The runtime socket defaults to:
 
@@ -51,10 +54,10 @@ The runtime socket defaults to:
 /var/run/freebsd-laboratory/runtime.sock
 mode: 0660
 owner: root
- group: freebsdlab
+group: freebsdlab
 ```
 
-Runtime names are constrained to the generated `freebsd-lab-<id>` namespace. Jupyter kernel provisioners request runtime creation/destruction and receive only normalized runtime metadata such as the assigned private IP address.
+Runtime names are constrained to the generated `freebsd-lab-<id>` namespace. Jupyter provisioners request runtime creation/destruction and receive normalized runtime metadata such as the assigned private address.
 
 ## JupyterLab and Jupyter Server
 
@@ -70,9 +73,9 @@ Runtime names are constrained to the generated `freebsd-lab-<id>` namespace. Jup
 
 `freebsd_laboratory/service.py` owns the evidence stream. The browser API accepts only `notebook-context` and `cell-executed`; machine-stage events remain server-only.
 
-On FreeBSD, the server extension also requests stale-runtime reconciliation from the runtime daemon during startup. Failure to reach the daemon is logged rather than converted into a false successful cleanup claim.
+On FreeBSD, the server extension also requests stale-runtime reconciliation from the runtime daemon during startup. Failure to reach the daemon is logged rather than converted into a false cleanup claim.
 
-## Private runtime network
+## Private runtime network and PF boundary
 
 Jails and bhyve guests share one host-only L2 domain:
 
@@ -84,19 +87,65 @@ runtime leases:  172.31.254.10-172.31.254.199
 physical uplink: none
 ```
 
-The bridge address is assigned to `labbridge0`, not to runtime member interfaces. Runtime-facing members are configured as private bridge ports. The network is therefore not bridged onto the host LAN, and private runtime members are not intended to forward directly to one another through the bridge.
+Runtime-facing members are private bridge ports. PF is evaluated on `labbridge0` with bridge-level pfil enabled. The reference anchor is deliberately narrower than the L2 network itself:
 
-The host-side bridge address remains a management endpoint. Deployments requiring complete guest-to-host network denial must additionally enforce host firewall policy on the laboratory interface.
+```text
+host -> runtime TCP/22:            pass, stateful
+host -> runtime any other IPv4:    block + log
+runtime -> host/routed IPv4:       block + log
+reply traffic for host SSH state:  pass through PF state
+```
+
+This removes direct guest-to-host access as an implicit dependency. Host services such as SSH, databases, NFS, Jupyter HTTP, or DNS are unavailable to a laboratory runtime unless a deployment deliberately adds a narrowly scoped exception.
+
+## SSH-only Jupyter transport
+
+`freebsd_laboratory/remote_kernel.py` turns the Jupyter connection document into a tunnel contract rather than a set of bridge-visible listeners.
+
+The standard TCP connection fields are validated:
+
+```text
+shell_port
+iopub_port
+stdin_port
+control_port
+hb_port
+```
+
+The connection IP is rewritten to `127.0.0.1` before the file is staged into the runtime. The same five random ports are then forwarded by the attached SSH process:
+
+```text
+127.0.0.1:<port> on host
+  -> ssh -L 127.0.0.1:<port>:127.0.0.1:<port>
+  -> 127.0.0.1:<port> in runtime
+```
+
+Therefore ipykernel binds only to runtime loopback, while the Jupyter client binds only to host loopback. The bridge carries SSH packets, not exposed Jupyter ZMQ sockets.
+
+The default transport resilience settings are:
+
+```text
+ConnectTimeout=5
+ConnectionAttempts=3
+ServerAliveInterval=15
+ServerAliveCountMax=4
+TCPKeepAlive=yes
+ExitOnForwardFailure=yes
+```
+
+`ExitOnForwardFailure` makes a local-forward bind/setup failure fatal to kernel startup. Server-alive probes detect a broken SSH path independently of Jupyter heartbeat traffic. If the attached SSH process ultimately exits, `LocalProvisioner` exposes that process failure to Jupyter instead of leaving a remote kernel that appears locally attached.
+
+These values are traitlet-backed provisioner configuration and can be overridden per kernelspec.
 
 ## VNET jail runtime
 
-`freebsd_laboratory/provisioner.py` remains a Jupyter `LocalProvisioner`, but it no longer creates a jail or invokes `jexec` directly. It asks the runtime daemon to create an isolated jail and then uses the same remote-kernel transport model as bhyve.
+`freebsd_laboratory/provisioner.py` is a Jupyter `LocalProvisioner` specialization. It asks the runtime daemon to create an isolated jail and then uses the common SSH tunnel transport.
 
-The privileged lifecycle is:
+Privileged lifecycle:
 
 ```text
 reserve private address
-  -> zfs clone freebsd-python@clean
+  -> zfs clone declared @clean snapshot
   -> epair create
   -> epairXa -> labbridge0
   -> mark epairXa private
@@ -107,43 +156,68 @@ reserve private address
   -> start sshd
 ```
 
-The Jupyter-side lifecycle is then:
+Jupyter-side lifecycle:
 
 ```text
 wait for authenticated SSH
-  -> rewrite Jupyter connection document IP to jail address
+  -> bind connection document to loopback
   -> SCP connection file to jail
-  -> launch ipykernel through attached SSH process
+  -> establish five SSH local forwards
+  -> launch loopback-bound ipykernel through attached SSH process
 ```
 
-This removes `ip4=inherit`: the jailed kernel no longer shares the host IP stack. The jail template still provides the FreeBSD userspace, Python/ipykernel, sshd, and the configured unprivileged guest account.
-
-The default storage layout is:
-
-```text
-zroot/jails/templates/freebsd-python@clean
-zroot/jails/containers/<runtime>
-/usr/local/jails/containers/<runtime>
-```
+The jail template provides FreeBSD userspace, Python/ipykernel, sshd, and the configured unprivileged guest account. `ip4=inherit` is not used.
 
 ## bhyve runtime
 
-`freebsd_laboratory/bhyve.py` uses the same runtime-daemon and SSH transport boundaries. Root-owned vm-bhyve commands are no longer executed by the Jupyter Server process.
+`freebsd_laboratory/bhyve.py` uses the same runtime-daemon and SSH tunnel boundaries. Root-owned vm-bhyve commands are not executed by Jupyter Server.
 
-The daemon binds a manual vm-bhyve switch named `freebsdlab` to `labbridge0` and enables private-switch behavior. It allocates an address from the same lease pool and creates the guest with the prepared `freebsd-python.raw` image and cloud-init network/key data.
-
-The Jupyter-side sequence is:
+The daemon binds a manual vm-bhyve switch named `freebsdlab` to `labbridge0`, allocates an address from the shared lease pool, and creates the guest from the prepared raw image with cloud-init network/key data.
 
 ```text
 request bhyve runtime
   -> receive assigned private address
   -> wait for SSH
-  -> rewrite connection-file IP
+  -> bind connection document to loopback
   -> stage connection file
-  -> SSH <guest> <ipykernel command>
+  -> establish five SSH local forwards
+  -> launch loopback-bound ipykernel
 ```
 
-The local SSH process remains attached to the remote kernel so Jupyter observes loss of the remote kernel process. Cleanup requests VM destruction through the daemon.
+Cleanup requests VM destruction through the daemon.
+
+## Golden image lifecycle
+
+The two runtime paths have a common rebuild policy under `deploy/freebsd/images/`.
+
+```text
+build-golden-images.sh
+  |
+  |-- validate clean FreeBSD releng/* source revision
+  |-- buildworld + buildkernel
+  |
+  +-- build-jail-template.sh
+  |     -> installworld/distribution into versioned ZFS dataset
+  |     -> install Python/ipykernel
+  |     -> restricted sshd configuration
+  |     -> pkg audit
+  |     -> embedded source/runtime manifest
+  |     -> immutable @clean snapshot
+  |
+  `-- build-bhyve-image.sh
+        -> FreeBSD release vm-image target
+        -> raw/UFS image
+        -> Python/ipykernel/cloud-init
+        -> restricted sshd configuration
+        -> pkg audit
+        -> versioned raw artifact + SHA-256 + manifest
+```
+
+Both artifacts receive the same build id and source revision. Construction is versioned; activation is a separate operator decision. This preserves rollback and avoids silently replacing the base of a running laboratory.
+
+A root-controlled `LAB_PKG_REPOS_DIR` can point the builders at a Poudriere/pkg repository configuration. Public/default package repositories remain the fallback when that variable is unset.
+
+The golden SSH policy permits only the feature needed by the transport (`AllowTcpForwarding local`) and disables password/root login, agent/X11 forwarding, gateway ports, and SSH tunnels. Image host keys are removed before finalization so instances do not inherit the builder's SSH identity.
 
 ## Crash recovery and reconciliation
 
@@ -161,43 +235,17 @@ Address leases are persisted below:
 
 A runtime record binds the generated runtime name to its runtime type, owning Jupyter PID, private address, and runtime-specific resources such as the ZFS dataset and epair interface.
 
-`freebsd-lab-gc` invokes the same reconciliation engine used at daemon startup. Stale-only reconciliation:
+`freebsd-lab-gc` invokes the same reconciliation engine used at daemon startup. Stale-only reconciliation keeps runtimes whose recorded owner PID exists; removes stale registered runtimes; discovers orphan prefixed jails, VMs and datasets; removes unreferenced epairs; and releases orphan address leases.
 
-1. keeps registered runtimes whose recorded owner PID still exists;
-2. destroys registered runtimes whose owner PID is gone;
-3. discovers prefixed jails, vm-bhyve guests, and ZFS datasets that have no retained registry owner;
-4. removes unreferenced epair members from the dedicated laboratory bridge;
-5. releases private-address leases that do not belong to retained runtimes.
-
-This makes cleanup independent of the normal kernel `cleanup()` path and covers SIGKILL/server-crash cases where Jupyter cannot execute its shutdown hooks. A host power failure leaves persistent resource state for the next daemon startup to reconcile.
+This makes cleanup independent of the normal kernel `cleanup()` path and covers SIGKILL/server-crash cases where Jupyter cannot execute shutdown hooks. A host power failure leaves persistent state for the next daemon startup to reconcile.
 
 ## Evidence manifest and optional signing
 
-The export format separates artifact integrity from signer authenticity.
+`manifest.json` contains the SHA-256 digest and byte size of each exported evidence artifact. `SHA256SUMS` remains available for conventional checksum tooling.
 
-`manifest.json` contains the SHA-256 digest and byte size of each evidence artifact:
-
-```text
-evidence.json
-environment.json
-events.jsonl
-```
-
-The manifest also records the lab/session metadata and whether signing is configured. `SHA256SUMS` remains available for conventional checksum tooling.
-
-When `evidence.signing.enabled` is true, `freebsd_laboratory/signing.py` signs the exact bytes of `manifest.json` using Ed25519 and writes:
-
-```text
-manifest.sig.json
-```
-
-The sidecar contains the algorithm, key id, manifest hash, public-key fingerprint, embedded public key, and signature. Because the signed manifest contains the artifact hashes, the signature transitively authenticates the evidence artifacts listed by that manifest.
-
-`freebsd-lab-verify-evidence` always verifies artifact hashes. If a trusted public key is supplied, it additionally requires the signature to verify with that external key. Verification using only the embedded key demonstrates internal consistency but does not establish institutional identity.
+When `evidence.signing.enabled` is true, `freebsd_laboratory/signing.py` signs the exact manifest bytes using Ed25519 and writes `manifest.sig.json`. A trusted external public key is required to turn signature consistency into signer identity.
 
 ## Trust progression
-
-The progression model remains deliberately asymmetric:
 
 | Stage | Current derivation | Trust source |
 |---|---|---|
@@ -209,23 +257,21 @@ The progression model remains deliberately asymmetric:
 | Recovered | `recovery-complete` | server-only machine event |
 | Designed | `design-validated` | server-only machine event |
 
-The later five machine-event producers are still intentionally incomplete. Runtime isolation and cryptographic signing must not be mistaken for experimental verification.
+The later five machine-event producers remain intentionally incomplete. Runtime isolation, a green CI run, and cryptographic signing are not substitutes for experimental verification.
 
 ## Declarative runtime choice
 
-`lab.yaml` declares the VNET jail as the default executor and bhyve as an alternative. Both reference the same privileged control socket and private network model.
-
-At this stage the Jupyter kernel picker selects the runtime. A later scheduler can select an executor from explicit laboratory capabilities such as `separate_kernel`, `boot_control`, `virtual_hardware`, or `privileged_networking`.
+`lab.yaml` declares the VNET jail as the default executor and bhyve as an alternative. Both reference the same privileged control socket and private network model. The Jupyter kernel picker currently selects the executor.
 
 ## Remaining validation boundary
 
-Linux CI can validate the protocol model, portable reconciliation logic, lease allocation, evidence hashing/signing, and Python/TypeScript builds. It cannot prove actual FreeBSD lifecycle behavior for `jail(8)`, `epair(4)`, `ifconfig(8)`, ZFS, or bhyve.
+Linux CI validates portable protocol logic, reconciliation, lease allocation, evidence signing, SSH tunnel construction, shell syntax, and Python/TypeScript builds. It cannot prove actual FreeBSD behavior for PF, `jail(8)`, `epair(4)`, ZFS, bhyve, the release image build, or `rc.d` boot ordering.
 
-The next implementation slice is therefore:
+The next evidence-producing implementation slice is:
 
-1. add a dedicated FreeBSD CI/self-hosted runner and execute real VNET-jail and bhyve kernel smoke tests;
-2. bind executor identity and runtime lifecycle events into server-owned evidence;
-3. execute clean-runtime repetition and emit `reproduction-complete` only from a declared comparison policy;
-4. implement `checks:` as server-side assertions and emit `verification-complete` only from their results;
-5. add explicit runtime resource controls and host firewall assertions;
-6. include the executed notebook and per-output artifacts in the signed evidence manifest.
+1. execute real VNET-jail and bhyve kernel smoke tests on a dedicated FreeBSD environment;
+2. validate the PF anchor with `pfctl -nf` and network-negative tests;
+3. build both golden artifacts from a clean `releng/*` source revision and record their hashes/manifests;
+4. bind executor identity and runtime lifecycle events into server-owned evidence;
+5. execute clean-runtime repetition and emit `reproduction-complete` only from a declared comparison policy;
+6. implement `checks:` as server-side assertions and emit `verification-complete` only from their results.
