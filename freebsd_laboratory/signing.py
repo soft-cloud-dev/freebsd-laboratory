@@ -92,8 +92,8 @@ def verify_manifest_signature(
 
     if trusted_public_key is not None:
         public_key = load_public_key(trusted_public_key)
-        trusted_pem = _public_pem(public_key)
-        if document.get("public_key_sha256") != sha256_bytes(trusted_pem):
+        public_pem = _public_pem(public_key)
+        if document.get("public_key_sha256") != sha256_bytes(public_pem):
             raise ValueError("Signature key does not match the trusted public key")
     else:
         serialization, _, _ = _cryptography()
@@ -104,6 +104,9 @@ def verify_manifest_signature(
         if not isinstance(loaded, Ed25519PublicKey):
             raise ValueError("Embedded signature key is not Ed25519")
         public_key = loaded
+        public_pem = _public_pem(public_key)
+        if document.get("public_key_sha256") != sha256_bytes(public_pem):
+            raise ValueError("Embedded public-key fingerprint does not match signature metadata")
 
     signature_raw = document.get("signature_base64")
     if not isinstance(signature_raw, str):
