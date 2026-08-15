@@ -19,6 +19,7 @@ from .remote_kernel import (
     LocalPortLeasePool,
     LocalPortReservation,
     SSHTransport,
+    release_jupyter_cached_ports,
     remote_kernel_command,
     restore_connection_file,
     rewrite_connection_file,
@@ -190,6 +191,8 @@ class FreeBSDBhyveProvisioner(LocalProvisioner):
             self._original_connection_ip = original_ip
             self._original_connection_ports = original_ports
             self._tunnel_ports = tunnel_ports
+            release_jupyter_cached_ports(self, original_ports)
+            self.connection_info = self.parent.get_connection_info()
 
             remote_connection = await asyncio.to_thread(
                 transport.stage,
