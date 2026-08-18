@@ -6,6 +6,7 @@ import os
 import shlex
 import shutil
 import socket
+import stat
 import subprocess
 import threading
 import time
@@ -193,21 +194,18 @@ class LocalPortReservation:
 
     def release(self) -> None:
         self.release_reservations()
-        self.pool.release(self.ports, self.owner)
+        self.pool.release(self.ports, self.owner, self.pid)
 
 
 class LocalPortLeasePool:
     """Cross-process lease pool for host-side SSH forwarding ports.
 
-    Allocation is serialized with ``flock`` and each selected TCP port is bound on
-    loopback until the provisioner calls ``launch_kernel``. Lease files remain in
-    place while SSH owns the listeners, preventing concurrent laboratory sessions
-    from selecting the same ports across Jupyter processes sharing the pool.
-
-    The setgid lease directory supplies the shared ``freebsdlab`` group. The lock
-    and lease files need group read, but not group write: ``flock(2)`` can take an
-    exclusive advisory lock on a read-only descriptor, and lease removal is
-    authorized by the parent directory rather than by file write permission.
+    Allocation is serialized with ``flock`` on a host-provisioned lock file and
+    each selected TCP port is bound on loopback until the provisioner calls
+    ``launch_kernel``. Lease ownership is encoded in private lease filenames, so
+    cooperating users need only directory access and never read another user's
+    lease file. The PID in the filename keeps a live lease authoritative during
+    the short reservation-to-OpenSSH handoff when no listener may exist yet.
     """
 
     def __init__(
@@ -234,61 +232,82 @@ class LocalPortLeasePool:
     def _nofollow_flag() -> int:
         return int(getattr(os, "O_NOFOLLOW", 0))
 
+    @staticmethod
+    def _directory_flag() -> int:
+        return int(getattr(os, "O_DIRECTORY", 0))
+
     @contextmanager
     def _locked(self) -> Iterator[None]:
         if fcntl is None:
             raise RuntimeError("Tunnel port leasing requires fcntl/flock support")
-        self.directory.mkdir(parents=True, exist_ok=True)
-        lock_path = self.directory / ".lock"
-        read_flags = os.O_RDONLY | self._nofollow_flag()
 
-        with _LOCAL_PORT_THREAD_LOCK:
-            created = False
+        directory_flags = os.O_RDONLY | self._directory_flag() | self._nofollow_flag()
+        try:
+            directory_fd = os.open(self.directory, directory_flags)
+        except OSError as error:
+            raise RuntimeError(
+                f"Tunnel lease directory must be provisioned by the host service: {self.directory}"
+            ) from error
+
+        try:
             try:
                 lock_fd = os.open(
-                    lock_path,
-                    read_flags | os.O_CREAT | os.O_EXCL,
-                    0o640,
+                    ".lock",
+                    os.O_RDWR | self._nofollow_flag(),
+                    dir_fd=directory_fd,
                 )
-                created = True
-            except FileExistsError:
-                lock_fd = os.open(lock_path, read_flags)
+            except OSError as error:
+                raise RuntimeError(
+                    f"Tunnel lease lock must be provisioned by the host service: {self.directory / '.lock'}"
+                ) from error
+
             try:
-                if created:
-                    os.fchmod(lock_fd, 0o640)
-                fcntl.flock(lock_fd, fcntl.LOCK_EX)
-                try:
-                    yield
-                finally:
-                    fcntl.flock(lock_fd, fcntl.LOCK_UN)
+                if not stat.S_ISREG(os.fstat(lock_fd).st_mode):
+                    raise RuntimeError("Tunnel lease lock is not a regular file")
+                with _LOCAL_PORT_THREAD_LOCK:
+                    fcntl.flock(lock_fd, fcntl.LOCK_EX)
+                    try:
+                        yield
+                    finally:
+                        fcntl.flock(lock_fd, fcntl.LOCK_UN)
             finally:
                 os.close(lock_fd)
+        finally:
+            os.close(directory_fd)
 
-    def _lease_path(self, port: int) -> Path:
-        return self.directory / f"{port}.lease"
+    @staticmethod
+    def _owner_digest(owner: str) -> str:
+        return hashlib.sha256(owner.encode("utf-8")).hexdigest()
 
-    def _read_lease(self, path: Path) -> dict[str, Any] | None:
+    def _lease_path(self, port: int, owner: str, pid: int) -> Path:
+        return self.directory / f"{port}.{pid}.{self._owner_digest(owner)}.lease"
+
+    def _lease_paths(self, port: int) -> list[Path]:
+        return list(self.directory.glob(f"{port}.*.lease"))
+
+    @staticmethod
+    def _lease_pid(path: Path, port: int) -> int:
+        parts = path.name.split(".")
+        if len(parts) != 4 or parts[0] != str(port) or parts[3] != "lease":
+            return 0
         try:
-            value = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, ValueError, TypeError):
-            return None
-        return value if isinstance(value, dict) else None
+            pid = int(parts[1])
+        except ValueError:
+            return 0
+        digest = parts[2]
+        if pid <= 0 or len(digest) != 64:
+            return 0
+        try:
+            int(digest, 16)
+        except ValueError:
+            return 0
+        return pid
 
-    def _write_lease(self, path: Path, owner: str, pid: int) -> None:
+    def _write_lease(self, path: Path) -> None:
         flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | self._nofollow_flag()
-        lease_fd = os.open(path, flags, 0o640)
+        lease_fd = os.open(path, flags, 0o600)
         try:
-            os.fchmod(lease_fd, 0o640)
-            payload = (json.dumps({"owner": owner, "pid": pid}) + "\n").encode("utf-8")
-            view = memoryview(payload)
-            while view:
-                written = os.write(lease_fd, view)
-                if written <= 0:
-                    raise OSError("Unable to write tunnel port lease")
-                view = view[written:]
-        except Exception:
-            path.unlink(missing_ok=True)
-            raise
+            os.fchmod(lease_fd, 0o600)
         finally:
             os.close(lease_fd)
 
@@ -324,24 +343,27 @@ class LocalPortLeasePool:
         with self._locked():
             try:
                 for port in self._candidate_ports(owner):
-                    lease_path = self._lease_path(port)
-                    if lease_path.exists():
-                        lease = self._read_lease(lease_path)
-                        lease_pid = 0
-                        if lease is not None:
-                            try:
-                                lease_pid = int(lease.get("pid", 0))
-                            except (TypeError, ValueError):
-                                lease_pid = 0
-                        if lease_pid > 0 and _pid_is_alive(lease_pid):
-                            continue
-                        lease_path.unlink(missing_ok=True)
+                    lease_paths = self._lease_paths(port)
+                    if any(
+                        (lease_pid := self._lease_pid(path, port)) > 0
+                        and _pid_is_alive(lease_pid)
+                        for path in lease_paths
+                    ):
+                        continue
 
                     reserved_socket = self._reserve_socket(port)
                     if reserved_socket is None:
                         continue
 
-                    self._write_lease(lease_path, owner, pid)
+                    try:
+                        for stale_path in lease_paths:
+                            stale_path.unlink(missing_ok=True)
+                        lease_path = self._lease_path(port, owner, pid)
+                        self._write_lease(lease_path)
+                    except Exception:
+                        reserved_socket.close()
+                        raise
+
                     created_paths.append(lease_path)
                     sockets.append(reserved_socket)
                     ports.append(port)
@@ -368,17 +390,12 @@ class LocalPortLeasePool:
                 f"Unable to reserve {count} SSH tunnel ports in {self.start}-{self.end}"
             )
 
-    def release(self, ports: Sequence[int], owner: str) -> None:
-        if not ports or not owner:
+    def release(self, ports: Sequence[int], owner: str, pid: int) -> None:
+        if not ports or not owner or pid <= 0:
             return
         with self._locked():
             for port in ports:
-                lease_path = self._lease_path(int(port))
-                if not lease_path.exists():
-                    continue
-                lease = self._read_lease(lease_path)
-                if lease is not None and lease.get("owner") == owner:
-                    lease_path.unlink(missing_ok=True)
+                self._lease_path(int(port), owner, pid).unlink(missing_ok=True)
 
 
 @dataclass
