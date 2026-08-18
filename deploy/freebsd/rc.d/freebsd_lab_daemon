@@ -45,6 +45,19 @@ freebsd_lab_daemon_prestart()
         /var/run/freebsd-laboratory
     /usr/bin/install -d -o root -g "${freebsd_lab_daemon_group}" -m 2770 \
         /var/run/freebsd-laboratory/tunnel-port-leases
+
+    tunnel_lock="/var/run/freebsd-laboratory/tunnel-port-leases/.lock"
+    if [ -L "${tunnel_lock}" ]; then
+        err 1 "Tunnel lease lock must not be a symbolic link: ${tunnel_lock}"
+    fi
+    if [ ! -e "${tunnel_lock}" ]; then
+        /usr/bin/install -o root -g "${freebsd_lab_daemon_group}" -m 0660 \
+            /dev/null "${tunnel_lock}"
+    else
+        /usr/sbin/chown root:"${freebsd_lab_daemon_group}" "${tunnel_lock}"
+        /bin/chmod 0660 "${tunnel_lock}"
+    fi
+
     /usr/bin/install -d -o root -g wheel -m 0700 \
         /var/db/freebsd-laboratory
 }
