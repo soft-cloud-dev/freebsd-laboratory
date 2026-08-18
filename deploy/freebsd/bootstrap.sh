@@ -86,7 +86,6 @@ pkg install -y git python3 npm
 PYTHON=/usr/local/bin/python3
 [ -x "$PYTHON" ] || fail "python3 was not installed at $PYTHON"
 PY_TAG=$($PYTHON -c 'import sys; print(f"py{sys.version_info.major}{sys.version_info.minor}")')
-PY_NUM=$($PYTHON -c 'import sys; print(f"{sys.version_info.major}{sys.version_info.minor}")')
 
 log "Installing FreeBSD binary Python/Jupyter dependencies for $PY_TAG"
 pkg install -y \
@@ -180,6 +179,15 @@ HOME="$JUPYTER_HOME" "$JUPYTER_VENV/bin/jupyter" server extension enable \
     --py freebsd_laboratory --sys-prefix
 HOME="$JUPYTER_HOME" "$JUPYTER_VENV/bin/jupyter" labextension develop \
     "$LAB_REPO_DIR/labextension" --overwrite
+
+for path in \
+    "$JUPYTER_HOME/.local" \
+    "$JUPYTER_HOME/.local/share" \
+    "$JUPYTER_HOME/.local/share/jupyter" \
+    "$JUPYTER_HOME/.local/share/jupyter/kernels"
+do
+    install -d -o "$LAB_JUPYTER_USER" -g "$JUPYTER_GROUP" -m 0755 "$path"
+done
 HOME="$JUPYTER_HOME" "$JUPYTER_VENV/bin/freebsd-lab-install-kernel"
 
 if is_yes "$LAB_BUILD_JAIL_IMAGE"; then
@@ -231,7 +239,7 @@ if is_yes "$LAB_BUILD_JAIL_IMAGE"; then
             SRC_DIR="$LAB_SRC_DIR" \
             JAIL_DATASET_PREFIX="${JAIL_TEMPLATE_PARENT}/freebsd-python" \
             JAIL_MOUNT_ROOT=/usr/local/jails/templates \
-            LAB_JAIL_PACKAGES="python${PY_NUM} ${PY_TAG}-ipykernel" \
+            LAB_JAIL_PACKAGES="python3 ${PY_TAG}-ipykernel" \
             "$LAB_REPO_DIR/deploy/freebsd/images/build-jail-template.sh"
 
         ACTIVE_SNAPSHOT=$(zfs list -H -t snapshot -o name -s creation -r "$JAIL_TEMPLATE_PARENT" \
