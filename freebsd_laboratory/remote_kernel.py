@@ -203,6 +203,11 @@ class LocalPortLeasePool:
     loopback until the provisioner calls ``launch_kernel``. Lease files remain in
     place while SSH owns the listeners, preventing concurrent laboratory sessions
     from selecting the same ports across Jupyter processes sharing the pool.
+
+    The setgid lease directory supplies the shared ``freebsdlab`` group. The lock
+    and lease files need group read, but not group write: ``flock(2)`` can take an
+    exclusive advisory lock on a read-only descriptor, and lease removal is
+    authorized by the parent directory rather than by file write permission.
     """
 
     def __init__(
@@ -225,26 +230,32 @@ class LocalPortLeasePool:
     def capacity(self) -> int:
         return self.end - self.start + 1
 
+    @staticmethod
+    def _nofollow_flag() -> int:
+        return int(getattr(os, "O_NOFOLLOW", 0))
+
     @contextmanager
     def _locked(self) -> Iterator[None]:
         if fcntl is None:
             raise RuntimeError("Tunnel port leasing requires fcntl/flock support")
         self.directory.mkdir(parents=True, exist_ok=True)
         lock_path = self.directory / ".lock"
+        read_flags = os.O_RDONLY | self._nofollow_flag()
+
         with _LOCAL_PORT_THREAD_LOCK:
             created = False
             try:
                 lock_fd = os.open(
                     lock_path,
-                    os.O_CREAT | os.O_EXCL | os.O_RDWR,
-                    0o600,
+                    read_flags | os.O_CREAT | os.O_EXCL,
+                    0o640,
                 )
                 created = True
             except FileExistsError:
-                lock_fd = os.open(lock_path, os.O_RDWR)
+                lock_fd = os.open(lock_path, read_flags)
             try:
                 if created:
-                    os.fchmod(lock_fd, 0o600)
+                    os.fchmod(lock_fd, 0o640)
                 fcntl.flock(lock_fd, fcntl.LOCK_EX)
                 try:
                     yield
@@ -262,6 +273,24 @@ class LocalPortLeasePool:
         except (OSError, ValueError, TypeError):
             return None
         return value if isinstance(value, dict) else None
+
+    def _write_lease(self, path: Path, owner: str, pid: int) -> None:
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | self._nofollow_flag()
+        lease_fd = os.open(path, flags, 0o640)
+        try:
+            os.fchmod(lease_fd, 0o640)
+            payload = (json.dumps({"owner": owner, "pid": pid}) + "\n").encode("utf-8")
+            view = memoryview(payload)
+            while view:
+                written = os.write(lease_fd, view)
+                if written <= 0:
+                    raise OSError("Unable to write tunnel port lease")
+                view = view[written:]
+        except Exception:
+            path.unlink(missing_ok=True)
+            raise
+        finally:
+            os.close(lease_fd)
 
     def _reserve_socket(self, port: int) -> socket.socket | None:
         reserved_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -312,11 +341,7 @@ class LocalPortLeasePool:
                     if reserved_socket is None:
                         continue
 
-                    lease_path.write_text(
-                        json.dumps({"owner": owner, "pid": pid}) + "\n",
-                        encoding="utf-8",
-                    )
-                    lease_path.chmod(0o660)
+                    self._write_lease(lease_path, owner, pid)
                     created_paths.append(lease_path)
                     sockets.append(reserved_socket)
                     ports.append(port)
