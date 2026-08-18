@@ -29,10 +29,20 @@ def test_bootstrap_uses_freebsd_binary_dependencies() -> None:
     assert 'pip install -e ".[dev]"' not in text
 
 
+def test_bootstrap_prepares_user_owned_jupyter_paths() -> None:
+    text = bootstrap_text()
+    assert '"$JUPYTER_HOME/.local/share/jupyter/kernels"' in text
+    assert 'install -d -o "$LAB_JUPYTER_USER" -g "$JUPYTER_GROUP" -m 0755 "$path"' in text
+    assert text.index('"$JUPYTER_HOME/.local/share/jupyter/kernels"') < text.index(
+        'HOME="$JUPYTER_HOME" "$JUPYTER_VENV/bin/freebsd-lab-install-kernel"'
+    )
+
+
 def test_bootstrap_builds_and_proves_real_jail_boundary() -> None:
     text = bootstrap_text()
     assert 'LAB_SRC_BRANCH="releng/$RELEASE_SERIES"' in text
     assert 'make -C "$LAB_SRC_DIR" -j"$JOBS" buildworld' in text
+    assert 'LAB_JAIL_PACKAGES="python3 ${PY_TAG}-ipykernel"' in text
     assert 'build-jail-template.sh' in text
     assert 'security.jail.jailed' in text
     assert '[ "$JAILED" = "1" ]' in text
