@@ -24,16 +24,23 @@ address pool:  172.31.254.10-172.31.254.199
 bridge:        labbridge0
 ```
 
-The service also creates the shared tunnel-port lease directory:
+The service also provisions the shared tunnel-port lease namespace and its advisory lock:
 
 ```text
 /var/run/freebsd-laboratory/tunnel-port-leases
 owner: root
- group: freebsdlab
- mode: 2770
+group: freebsdlab
+mode:  2770
+
+/var/run/freebsd-laboratory/tunnel-port-leases/.lock
+owner: root
+group: freebsdlab
+mode:  0660
 ```
 
-The setgid directory gives every authorized Jupyter process the same host-wide coordination namespace without granting access outside the existing `freebsdlab` operator group.
+The setgid directory gives every authorized Jupyter process the same host-wide coordination namespace without granting access outside the existing `freebsdlab` operator group. The root-owned `.lock` is the only lease object that needs group read/write access because every cooperating process opens the same descriptor for `flock(2)`. Per-session lease files are created as `0600`; their filenames carry only the leased port, owner PID and a SHA-256 owner digest, so peer allocators can test liveness without reading another user's file.
+
+The Python allocator does not create or widen the shared `.lock`. If the host service has not provisioned it, allocation fails closed. The rc.d pre-start hook rejects a symbolic-link lock path and restores the regular lock's root/group ownership and `0660` mode on service start.
 
 Merge the relevant settings from `deploy/freebsd/rc.conf.snippet` into `/etc/rc.conf`. The sample creates an ordinary `bridge0` clone and immediately renames it to the stable name `labbridge0`; if `bridge0` is already in use, select another unused `bridge<N>` clone and adjust the corresponding variable names. Creating the named bridge through the normal network startup path makes `labbridge0` available before PF loads its interface-bound anchor.
 
@@ -135,9 +142,11 @@ ports/session:   5
 bind address:    127.0.0.1
 ```
 
-Allocation is serialized by `flock(2)` on the shared lease directory. Each candidate port is also actually bound on `127.0.0.1` before it is accepted, so ports already owned by the host are skipped. The five reservation sockets stay open throughout runtime creation, SSH readiness checks, connection-file rewriting, and SCP staging.
+Allocation is serialized by `flock(2)` on the root-provisioned `.lock` file. Each candidate port is also actually bound on `127.0.0.1` before it is accepted, so ports already owned by the host are skipped. The five reservation sockets stay open throughout runtime creation, SSH readiness checks, connection-file rewriting, and SCP staging.
 
-Immediately before `LocalProvisioner.launch_kernel()` starts OpenSSH, those reservation sockets are closed so `ssh -L` can acquire the listeners. The lease files remain owned by that kernel until cleanup. This prevents a second FreeBSD Laboratory kernel—whether launched concurrently in the same Jupyter process or by another authorized Jupyter process—from selecting any of the five ports during the handoff or while the SSH tunnel is alive.
+Each active lease is a zero-byte `0600` file named `<port>.<pid>.<owner-sha256>.lease`. A peer allocator obtains the shared lock, inspects filenames rather than file contents, and treats a lease with a live PID as authoritative. If no lease PID is live, the allocator must still successfully bind the candidate port before removing stale lease names and claiming it. This preserves the collision guarantee without making per-session metadata group-readable.
+
+Immediately before `LocalProvisioner.launch_kernel()` starts OpenSSH, those reservation sockets are closed so `ssh -L` can acquire the listeners. The PID-bearing lease filename remains authoritative during that handoff and stays in place until cleanup. This prevents a second FreeBSD Laboratory kernel—whether launched concurrently in the same Jupyter process or by another authorized Jupyter process—from selecting any of the five ports during the handoff or while the SSH tunnel is alive.
 
 The guarantee covers cooperating FreeBSD Laboratory sessions that share this lease directory. An unrelated host process can still race to bind a port after the reservation socket is handed to OpenSSH; `ExitOnForwardFailure=yes` makes that exceptional race fail kernel startup rather than silently attaching to the wrong listener.
 
