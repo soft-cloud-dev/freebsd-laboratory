@@ -155,12 +155,16 @@ def test_port_pool_skips_ports_already_owned_by_host_process(tmp_path: Path) -> 
         occupied.close()
 
 
-def test_port_pool_lock_is_group_writable(tmp_path: Path) -> None:
+def test_port_pool_uses_least_privilege_shared_file_modes(tmp_path: Path) -> None:
     start, end = find_free_range(16)
     pool = LocalPortLeasePool(start, end, tmp_path / "leases")
     reservation = pool.allocate("session-a", os.getpid(), 5)
     try:
-        assert (pool.directory / ".lock").stat().st_mode & 0o660 == 0o660
+        lock_mode = (pool.directory / ".lock").stat().st_mode & 0o777
+        assert lock_mode == 0o640
+        for port in reservation.ports:
+            lease_mode = (pool.directory / f"{port}.lease").stat().st_mode & 0o777
+            assert lease_mode == 0o640
     finally:
         reservation.release()
 
