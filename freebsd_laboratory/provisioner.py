@@ -13,7 +13,11 @@ from jupyter_client.provisioning import LocalProvisioner
 from traitlets import Int, Unicode
 
 from .remote_kernel import (
+    CONNECTION_PORT_FIELDS,
+    LocalPortLeasePool,
+    LocalPortReservation,
     SSHTransport,
+    release_jupyter_cached_ports,
     remote_kernel_command,
     restore_connection_file,
     rewrite_connection_file,
@@ -43,8 +47,9 @@ class FreeBSDJailProvisioner(LocalProvisioner):
     """Run ipykernel inside an ephemeral, VNET-isolated FreeBSD jail.
 
     Privileged lifecycle work is delegated to freebsd-lab-runtime-daemon over a
-    Unix-domain socket. The Jupyter process only uses the private lab network and
-    SSH, so JupyterLab/Jupyter Server itself does not need to run as root.
+    Unix-domain socket. The Jupyter process reaches the jail only through SSH;
+    all Jupyter TCP channels are loopback-bound and forwarded through that SSH
+    session, so the guest exposes no ZMQ ports on the laboratory bridge.
     """
 
     runtime_socket: str = Unicode(DEFAULT_RUNTIME_SOCKET).tag(config=True)
@@ -57,12 +62,24 @@ class FreeBSDJailProvisioner(LocalProvisioner):
     remote_connection_dir: str = Unicode("/tmp/freebsd-laboratory").tag(config=True)
     runtime_dir: str = Unicode("~/.cache/freebsd-laboratory/runtime").tag(config=True)
     startup_timeout: int = Int(30, min=5).tag(config=True)
+    ssh_connect_timeout: int = Int(5, min=1).tag(config=True)
+    ssh_connection_attempts: int = Int(3, min=1).tag(config=True)
+    ssh_server_alive_interval: int = Int(15, min=1).tag(config=True)
+    ssh_server_alive_count_max: int = Int(4, min=1).tag(config=True)
+    tunnel_lease_dir: str = Unicode(
+        "/var/run/freebsd-laboratory/tunnel-port-leases"
+    ).tag(config=True)
+    tunnel_port_start: int = Int(30000, min=1024, max=65535).tag(config=True)
+    tunnel_port_end: int = Int(44999, min=1024, max=65535).tag(config=True)
 
     jail_name: str | None = None
     guest_ip: str | None = None
     known_hosts_file: Path | None = None
     _runtime_created = False
     _original_connection_ip: str | None = None
+    _original_connection_ports: tuple[int, ...] = ()
+    _tunnel_ports: tuple[int, ...] = ()
+    _tunnel_reservation: LocalPortReservation | None = None
 
     @staticmethod
     def _assert_supported_host() -> None:
@@ -87,7 +104,24 @@ class FreeBSDJailProvisioner(LocalProvisioner):
             known_hosts_file=self.known_hosts_file,
             ssh_command=self.ssh_command,
             scp_command=self.scp_command,
+            connect_timeout=self.ssh_connect_timeout,
+            connection_attempts=self.ssh_connection_attempts,
+            server_alive_interval=self.ssh_server_alive_interval,
+            server_alive_count_max=self.ssh_server_alive_count_max,
         )
+
+    def _port_pool(self) -> LocalPortLeasePool:
+        return LocalPortLeasePool(
+            self.tunnel_port_start,
+            self.tunnel_port_end,
+            Path(self.tunnel_lease_dir).expanduser(),
+        )
+
+    def _release_tunnel_ports(self) -> None:
+        reservation, self._tunnel_reservation = self._tunnel_reservation, None
+        if reservation is not None:
+            reservation.release()
+        self._tunnel_ports = ()
 
     async def _create_runtime(self) -> None:
         self.jail_name = runtime_name(str(self.kernel_id))
@@ -108,6 +142,7 @@ class FreeBSDJailProvisioner(LocalProvisioner):
         self._runtime_created = True
 
     async def _destroy_runtime(self) -> None:
+        self._release_tunnel_ports()
         name = self.jail_name
         if self._runtime_created and name:
             try:
@@ -129,10 +164,27 @@ class FreeBSDJailProvisioner(LocalProvisioner):
             transport.assert_available()
             await asyncio.to_thread(transport.wait_until_ready, self.startup_timeout)
 
-            if self.parent is None:
-                raise RuntimeError("Kernel manager is unavailable")
-            host_connection, original_ip = rewrite_connection_file(self.parent, self.guest_ip or "")
+            if self.parent is None or self.jail_name is None:
+                raise RuntimeError("Kernel manager or jail name is unavailable")
+
+            reservation = await asyncio.to_thread(
+                self._port_pool().allocate,
+                self.jail_name,
+                os.getpid(),
+                len(CONNECTION_PORT_FIELDS),
+            )
+            self._tunnel_reservation = reservation
+
+            host_connection, original_ip, original_ports, tunnel_ports = rewrite_connection_file(
+                self.parent,
+                ports=reservation.ports,
+            )
             self._original_connection_ip = original_ip
+            self._original_connection_ports = original_ports
+            self._tunnel_ports = tunnel_ports
+            release_jupyter_cached_ports(self, original_ports)
+            self.connection_info = self.parent.get_connection_info()
+
             remote_connection = await asyncio.to_thread(
                 transport.stage,
                 host_connection,
@@ -144,14 +196,39 @@ class FreeBSDJailProvisioner(LocalProvisioner):
                 remote_connection,
             )
             prepared["cmd"] = transport.command(
-                "exec " + " ".join(shlex.quote(value) for value in kernel_command)
+                "exec " + " ".join(shlex.quote(value) for value in kernel_command),
+                forward_ports=tunnel_ports,
             )
             prepared.pop("cwd", None)
             return prepared
         except Exception:
             if self.parent is not None:
-                restore_connection_file(self.parent, self._original_connection_ip)
+                restore_connection_file(
+                    self.parent,
+                    self._original_connection_ip,
+                    self._original_connection_ports,
+                )
             self._original_connection_ip = None
+            self._original_connection_ports = ()
+            await self._destroy_runtime()
+            raise
+
+    async def launch_kernel(self, cmd: list[str], **kwargs: Any) -> dict[str, Any]:
+        """Hand the pre-bound local ports directly from reservation to OpenSSH."""
+        reservation = self._tunnel_reservation
+        if reservation is not None:
+            reservation.release_reservations()
+        try:
+            return await super().launch_kernel(cmd, **kwargs)
+        except Exception:
+            if self.parent is not None:
+                restore_connection_file(
+                    self.parent,
+                    self._original_connection_ip,
+                    self._original_connection_ports,
+                )
+            self._original_connection_ip = None
+            self._original_connection_ports = ()
             await self._destroy_runtime()
             raise
 
@@ -160,8 +237,13 @@ class FreeBSDJailProvisioner(LocalProvisioner):
             await super().cleanup(restart=restart)
         finally:
             if self.parent is not None:
-                restore_connection_file(self.parent, self._original_connection_ip)
+                restore_connection_file(
+                    self.parent,
+                    self._original_connection_ip,
+                    self._original_connection_ports,
+                )
             self._original_connection_ip = None
+            self._original_connection_ports = ()
             await self._destroy_runtime()
 
     async def get_provisioner_info(self) -> dict[str, Any]:
@@ -173,6 +255,8 @@ class FreeBSDJailProvisioner(LocalProvisioner):
                 "known_hosts_file": str(self.known_hosts_file) if self.known_hosts_file else None,
                 "runtime_created": self._runtime_created,
                 "original_connection_ip": self._original_connection_ip,
+                "original_connection_ports": list(self._original_connection_ports),
+                "tunnel_ports": list(self._tunnel_ports),
             }
         )
         return info
@@ -185,3 +269,7 @@ class FreeBSDJailProvisioner(LocalProvisioner):
         self.known_hosts_file = Path(known_hosts_file) if known_hosts_file else None
         self._runtime_created = bool(provisioner_info.get("runtime_created"))
         self._original_connection_ip = provisioner_info.get("original_connection_ip")
+        original_ports = provisioner_info.get("original_connection_ports", [])
+        self._original_connection_ports = tuple(int(value) for value in original_ports)
+        tunnel_ports = provisioner_info.get("tunnel_ports", [])
+        self._tunnel_ports = tuple(int(value) for value in tunnel_ports)

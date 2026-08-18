@@ -18,7 +18,18 @@ jobs:
       - run: python -m pip install --upgrade pip
       - run: python -m pip install -e ".[dev]"
       - run: python -m compileall -q freebsd_laboratory tests
-      - run: sh -n deploy/freebsd/rc.d/freebsd_lab_daemon
+      - name: Validate FreeBSD shell assets
+        run: |
+          test -x deploy/freebsd/validate-pf.sh
+          test -x deploy/freebsd/images/build-golden-images.sh
+          test -x deploy/freebsd/images/build-jail-template.sh
+          test -x deploy/freebsd/images/build-bhyve-image.sh
+          sh -n deploy/freebsd/rc.d/freebsd_lab_daemon
+          sh -n deploy/freebsd/validate-pf.sh
+          sh -n deploy/freebsd/images/build-golden-images.sh
+          sh -n deploy/freebsd/images/build-jail-template.sh
+          sh -n deploy/freebsd/images/build-bhyve-image.sh
+          sh -n deploy/freebsd/images/vmimage.conf
       - run: pytest -q
 
   labextension:
