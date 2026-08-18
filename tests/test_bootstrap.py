@@ -20,13 +20,20 @@ def test_bootstrap_keeps_root_daemon_out_of_user_checkout() -> None:
     )
 
 
-def test_bootstrap_uses_freebsd_binary_dependencies() -> None:
+def test_bootstrap_uses_freebsd_binary_runtime_dependencies() -> None:
     text = bootstrap_text()
     assert '"${PY_TAG}-jupyterlab"' in text
     assert '"${PY_TAG}-cryptography"' in text
     assert '"${PY_TAG}-pyyaml"' in text
-    assert "--no-deps --no-build-isolation" in text
+    assert "--no-deps" in text
+    assert "--no-build-isolation" not in text
     assert 'pip install -e ".[dev]"' not in text
+
+
+def test_bootstrap_honors_pyproject_build_requirements() -> None:
+    text = bootstrap_text()
+    assert '"$LAB_DAEMON_VENV/bin/python" -m pip install \\\n    --no-deps "$LAB_REPO_DIR"' in text
+    assert '"$JUPYTER_VENV/bin/python" -m pip install \\\n    --no-deps -e "$LAB_REPO_DIR"' in text
 
 
 def test_bootstrap_prepares_user_owned_jupyter_paths() -> None:
