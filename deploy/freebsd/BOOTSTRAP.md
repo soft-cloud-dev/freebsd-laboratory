@@ -2,7 +2,7 @@
 
 `deploy/freebsd/bootstrap.sh` turns a new ZFS-backed FreeBSD installation into a usable FreeBSD Laboratory host without requiring the manual setup sequence documented elsewhere in this directory.
 
-The bootstrap is intentionally FreeBSD-native. It uses `pkg` binary packages for JupyterLab, PyZMQ, cryptography, ipykernel, and related Python dependencies instead of asking pip to compile those projects from PyPI. The repository package itself is then installed with `--no-deps --no-build-isolation` into two separate virtual environments:
+The bootstrap is intentionally FreeBSD-native. It uses `pkg` binary packages for JupyterLab, PyZMQ, cryptography, ipykernel, and related runtime dependencies instead of asking pip to compile those projects from PyPI. The repository package itself is installed with `--no-deps` into two separate virtual environments. Pip build isolation remains enabled so the `[build-system]` requirement from `pyproject.toml` (`setuptools>=77`) is honored even when the FreeBSD system setuptools package is older; only the lightweight build backend is isolated, while heavy runtime dependencies continue to come from FreeBSD packages.
 
 - a root-owned daemon environment under `/usr/local/libexec/freebsd-laboratory/`;
 - a Jupyter environment in `<repo>/.venv` owned by the configured Jupyter user after bootstrap completes.
