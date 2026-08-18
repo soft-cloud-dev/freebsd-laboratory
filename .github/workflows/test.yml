@@ -20,10 +20,12 @@ jobs:
       - run: python -m compileall -q freebsd_laboratory tests
       - name: Validate FreeBSD shell assets
         run: |
+          test -x deploy/freebsd/bootstrap.sh
           test -x deploy/freebsd/validate-pf.sh
           test -x deploy/freebsd/images/build-golden-images.sh
           test -x deploy/freebsd/images/build-jail-template.sh
           test -x deploy/freebsd/images/build-bhyve-image.sh
+          sh -n deploy/freebsd/bootstrap.sh
           sh -n deploy/freebsd/rc.d/freebsd_lab_daemon
           sh -n deploy/freebsd/validate-pf.sh
           sh -n deploy/freebsd/images/build-golden-images.sh
