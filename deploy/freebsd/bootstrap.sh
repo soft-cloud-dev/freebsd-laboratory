@@ -62,7 +62,7 @@ if ! pw usershow "$LAB_JUPYTER_USER" >/dev/null 2>&1; then
     fail "Jupyter user does not exist: $LAB_JUPYTER_USER"
 fi
 
-JUPYTER_HOME=$(pw usershow "$LAB_JUPYTER_USER" -7 | awk -F: '{print $6}')
+JUPYTER_HOME=$(pw usershow -n "$LAB_JUPYTER_USER" -7 | awk -F: '{print $6}')
 [ -n "$JUPYTER_HOME" ] || fail "Unable to determine home for $LAB_JUPYTER_USER"
 JUPYTER_GROUP=$(id -gn "$LAB_JUPYTER_USER")
 
@@ -70,7 +70,12 @@ if [ -z "$LAB_REPO_DIR" ]; then
     LAB_REPO_DIR="${JUPYTER_HOME%/}/freebsd-laboratory"
 fi
 case "$LAB_REPO_DIR" in
+    /|"") fail "LAB_REPO_DIR must not be / or empty" ;;
     *[!A-Za-z0-9_./-]*) fail "LAB_REPO_DIR contains unsupported characters: $LAB_REPO_DIR" ;;
+esac
+case "$LAB_DAEMON_VENV" in
+    /usr/local/libexec/freebsd-laboratory/*) ;;
+    *) fail "LAB_DAEMON_VENV must stay below /usr/local/libexec/freebsd-laboratory" ;;
 esac
 
 log "Bootstrapping package manager and base tools"
@@ -177,14 +182,6 @@ HOME="$JUPYTER_HOME" "$JUPYTER_VENV/bin/jupyter" labextension develop \
     "$LAB_REPO_DIR/labextension" --overwrite
 HOME="$JUPYTER_HOME" "$JUPYTER_VENV/bin/freebsd-lab-install-kernel"
 
-chown -R "$LAB_JUPYTER_USER:$JUPYTER_GROUP" "$LAB_REPO_DIR"
-for kernel_dir in freebsd-python freebsd-python-bhyve; do
-    if [ -d "$JUPYTER_HOME/.local/share/jupyter/kernels/$kernel_dir" ]; then
-        chown -R "$LAB_JUPYTER_USER:$JUPYTER_GROUP" \
-            "$JUPYTER_HOME/.local/share/jupyter/kernels/$kernel_dir"
-    fi
-done
-
 if is_yes "$LAB_BUILD_JAIL_IMAGE"; then
     RELEASE=$(freebsd-version -u 2>/dev/null || uname -r)
     RELEASE_SERIES=$(printf '%s\n' "$RELEASE" | sed -E 's/^([0-9]+\.[0-9]+).*/\1/')
@@ -251,8 +248,18 @@ install -m 0555 "$LAB_REPO_DIR/deploy/freebsd/rc.d/freebsd_lab_daemon" \
 install -d -m 0755 /etc/sysctl.kld.d /usr/local/etc/pf.anchors
 install -m 0644 "$LAB_REPO_DIR/deploy/freebsd/sysctl.kld.d/if_bridge.conf" \
     /etc/sysctl.kld.d/if_bridge.conf
-install -m 0644 "$LAB_REPO_DIR/deploy/freebsd/pf.anchors/freebsd-lab" \
-    /usr/local/etc/pf.anchors/freebsd-lab
+
+PF_ANCHOR_TMP=$(mktemp /tmp/freebsd-lab-anchor.XXXXXX)
+trap 'rm -f "$PF_ANCHOR_TMP"' EXIT HUP INT TERM
+sed \
+    -e "s/^lab_if = .*/lab_if = \"$LAB_BRIDGE_NAME\"/" \
+    -e "s#^lab_net = .*#lab_net = \"$LAB_NETWORK\"#" \
+    -e "s/^lab_host = .*/lab_host = \"$LAB_HOST_ADDRESS\"/" \
+    "$LAB_REPO_DIR/deploy/freebsd/pf.anchors/freebsd-lab" > "$PF_ANCHOR_TMP"
+install -m 0644 "$PF_ANCHOR_TMP" /usr/local/etc/pf.anchors/freebsd-lab
+rm -f "$PF_ANCHOR_TMP"
+trap - EXIT HUP INT TERM
+
 install -m 0555 "$LAB_REPO_DIR/deploy/freebsd/validate-pf.sh" \
     /usr/local/sbin/freebsd-lab-validate-pf
 
@@ -293,7 +300,7 @@ sysctl net.link.bridge.pfil_member=0 >/dev/null
 
 if is_yes "$LAB_CONFIGURE_PF"; then
     log "Installing and validating the PF anchor"
-    PF_ANCHOR='anchor "freebsd-lab" on labbridge0'
+    PF_ANCHOR="anchor \"freebsd-lab\" on $LAB_BRIDGE_NAME"
     PF_LOAD='load anchor "freebsd-lab" from "/usr/local/etc/pf.anchors/freebsd-lab"'
     PF_TMP=$(mktemp /tmp/freebsd-lab-pf.XXXXXX)
     trap 'rm -f "$PF_TMP"' EXIT HUP INT TERM
@@ -313,7 +320,9 @@ if is_yes "$LAB_CONFIGURE_PF"; then
     } > "$PF_TMP"
     pfctl -nf "$PF_TMP"
     if [ -f "$LAB_PF_CONF" ]; then
-        cp -p "$LAB_PF_CONF" "${LAB_PF_CONF}.freebsd-lab.bak"
+        PF_BACKUP="${LAB_PF_CONF}.freebsd-lab.$(date -u +%Y%m%dT%H%M%SZ).bak"
+        cp -p "$LAB_PF_CONF" "$PF_BACKUP"
+        printf 'Saved previous PF ruleset to %s\n' "$PF_BACKUP"
     fi
     install -m 0600 "$PF_TMP" "$LAB_PF_CONF"
     rm -f "$PF_TMP"
@@ -362,6 +371,15 @@ PY
     trap - EXIT HUP INT TERM
 fi
 
+log "Assigning the Jupyter checkout to $LAB_JUPYTER_USER"
+chown -R "$LAB_JUPYTER_USER:$JUPYTER_GROUP" "$LAB_REPO_DIR"
+for kernel_dir in freebsd-python freebsd-python-bhyve; do
+    if [ -d "$JUPYTER_HOME/.local/share/jupyter/kernels/$kernel_dir" ]; then
+        chown -R "$LAB_JUPYTER_USER:$JUPYTER_GROUP" \
+            "$JUPYTER_HOME/.local/share/jupyter/kernels/$kernel_dir"
+    fi
+done
+
 log "Bootstrap complete"
 printf 'Repository:       %s\n' "$LAB_REPO_DIR"
 printf 'Jupyter user:     %s\n' "$LAB_JUPYTER_USER"
@@ -371,6 +389,7 @@ printf 'Runtime socket:   %s\n' /var/run/freebsd-laboratory/runtime.sock
 if [ -n "$ACTIVE_SNAPSHOT" ]; then
     printf 'Jail snapshot:    %s\n' "$ACTIVE_SNAPSHOT"
 fi
-printf '\nStart JupyterLab as the configured user with:\n'
+printf '\nA new login is required before a non-root Jupyter user inherits the %s group.\n' "$LAB_GROUP"
+printf 'Start JupyterLab as %s with:\n' "$LAB_JUPYTER_USER"
 printf '  cd %s && %s/bin/jupyter lab --ServerApp.root_dir=%s --ip=0.0.0.0 --no-browser\n' \
     "$LAB_REPO_DIR" "$JUPYTER_VENV" "$LAB_REPO_DIR"
