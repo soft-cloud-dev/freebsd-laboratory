@@ -68,6 +68,12 @@ def find_free_range(count: int) -> tuple[int, int]:
     raise RuntimeError("Unable to find a free TCP range for test")
 
 
+def make_pool(start: int, end: int, directory: Path) -> LocalPortLeasePool:
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / ".lock").touch(mode=0o600, exist_ok=True)
+    return LocalPortLeasePool(start, end, directory)
+
+
 def test_connection_ports_requires_complete_unique_tcp_ports() -> None:
     assert connection_ports(PORTS) == tuple(PORTS.values())
 
@@ -111,7 +117,7 @@ def test_port_pool_prevents_concurrent_session_collisions(tmp_path: Path) -> Non
     session_count = 12
     ports_per_session = 5
     start, end = find_free_range(128)
-    pool = LocalPortLeasePool(start, end, tmp_path / "leases")
+    pool = make_pool(start, end, tmp_path / "leases")
     barrier = Barrier(session_count)
 
     def allocate(index: int):
@@ -125,8 +131,8 @@ def test_port_pool_prevents_concurrent_session_collisions(tmp_path: Path) -> Non
     assert len(all_ports) == session_count * ports_per_session
     assert len(set(all_ports)) == len(all_ports)
 
-    # Simulate the launch handoff: the pre-bound sockets are closed immediately
-    # before OpenSSH binds, but the process-wide lease remains authoritative.
+    # Simulate the launch handoff: pre-bound sockets are closed immediately before
+    # OpenSSH binds, while PID-bearing lease filenames remain authoritative.
     for reservation in reservations:
         reservation.release_reservations()
 
@@ -144,7 +150,7 @@ def test_port_pool_skips_ports_already_owned_by_host_process(tmp_path: Path) -> 
     occupied.bind(("127.0.0.1", start))
     occupied.listen(1)
     try:
-        reservation = LocalPortLeasePool(start, end, tmp_path / "leases").allocate(
+        reservation = make_pool(start, end, tmp_path / "leases").allocate(
             "session-a",
             os.getpid(),
             5,
@@ -155,16 +161,29 @@ def test_port_pool_skips_ports_already_owned_by_host_process(tmp_path: Path) -> 
         occupied.close()
 
 
-def test_port_pool_uses_least_privilege_shared_file_modes(tmp_path: Path) -> None:
+def test_port_pool_requires_host_provisioned_lock(tmp_path: Path) -> None:
     start, end = find_free_range(16)
-    pool = LocalPortLeasePool(start, end, tmp_path / "leases")
+    directory = tmp_path / "leases"
+    directory.mkdir()
+    pool = LocalPortLeasePool(start, end, directory)
+
+    with pytest.raises(RuntimeError, match="lock must be provisioned"):
+        pool.allocate("session-a", os.getpid(), 5)
+
+
+def test_port_pool_keeps_lease_files_private(tmp_path: Path) -> None:
+    start, end = find_free_range(16)
+    pool = make_pool(start, end, tmp_path / "leases")
+    lock_path = pool.directory / ".lock"
+    lock_mode_before = lock_path.stat().st_mode & 0o777
     reservation = pool.allocate("session-a", os.getpid(), 5)
     try:
-        lock_mode = (pool.directory / ".lock").stat().st_mode & 0o777
-        assert lock_mode == 0o640
+        assert lock_path.stat().st_mode & 0o777 == lock_mode_before
         for port in reservation.ports:
-            lease_mode = (pool.directory / f"{port}.lease").stat().st_mode & 0o777
-            assert lease_mode == 0o640
+            lease_paths = list(pool.directory.glob(f"{port}.*.lease"))
+            assert len(lease_paths) == 1
+            assert lease_paths[0].stat().st_mode & 0o777 == 0o600
+            assert lease_paths[0].read_bytes() == b""
     finally:
         reservation.release()
 
