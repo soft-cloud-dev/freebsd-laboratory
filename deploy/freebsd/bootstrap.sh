@@ -159,7 +159,7 @@ rm -rf "$LAB_DAEMON_VENV"
 install -d -o root -g wheel -m 0755 "$(dirname "$LAB_DAEMON_VENV")"
 $PYTHON -m venv --system-site-packages "$LAB_DAEMON_VENV"
 "$LAB_DAEMON_VENV/bin/python" -m pip install \
-    --no-deps --no-build-isolation "$LAB_REPO_DIR"
+    --no-deps "$LAB_REPO_DIR"
 chown -R root:wheel "$LAB_DAEMON_VENV"
 chmod -R go-w "$LAB_DAEMON_VENV"
 
@@ -167,7 +167,7 @@ JUPYTER_VENV="${LAB_REPO_DIR%/}/.venv"
 rm -rf "$JUPYTER_VENV"
 $PYTHON -m venv --system-site-packages "$JUPYTER_VENV"
 "$JUPYTER_VENV/bin/python" -m pip install \
-    --no-deps --no-build-isolation -e "$LAB_REPO_DIR"
+    --no-deps -e "$LAB_REPO_DIR"
 
 log "Building and registering the JupyterLab extension"
 (
