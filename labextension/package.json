@@ -7,23 +7,23 @@
   "types": "lib/index.d.ts",
   "style": "style/index.css",
   "scripts": {
-    "build": "npm run build:lib && npm run build:labextension",
+    "build": "npm run clean && npm run build:lib && npm run build:labextension",
     "build:lib": "tsc",
     "build:labextension": "jupyter-builder build .",
     "clean": "rimraf lib labextension tsconfig.tsbuildinfo"
   },
   "dependencies": {
-    "@jupyterlab/application": "^4.3.0",
-    "@jupyterlab/apputils": "^4.3.0",
-    "@jupyterlab/coreutils": "^6.3.0",
-    "@jupyterlab/notebook": "^4.3.0",
-    "@jupyterlab/services": "^7.3.0",
-    "@lumino/widgets": "^2.5.0"
+    "@jupyterlab/application": "4.6.1",
+    "@jupyterlab/apputils": "4.7.1",
+    "@jupyterlab/coreutils": "6.6.1",
+    "@jupyterlab/notebook": "4.6.1",
+    "@jupyterlab/services": "7.6.1",
+    "@lumino/widgets": "2.8.0"
   },
   "devDependencies": {
-    "@jupyterlab/builder": "^4.3.0",
-    "rimraf": "^6.0.0",
-    "typescript": "~5.7.0"
+    "@jupyterlab/builder": "4.6.1",
+    "rimraf": "6.0.0",
+    "typescript": "5.9.3"
   },
   "jupyterlab": {
     "extension": true,
