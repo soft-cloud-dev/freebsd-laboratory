@@ -30,6 +30,13 @@ class DiagnosticResult:
     detail: str
 
 
+@dataclass(frozen=True)
+class DeliveryEvidence:
+    event_id: str | None
+    http_status: int | None
+    dropped_reasons: tuple[str, ...]
+
+
 class DiagnosticFailure(RuntimeError):
     pass
 
@@ -140,6 +147,120 @@ def _connect_resolved(addresses: list[tuple], *, timeout: float) -> socket.socke
     raise last_error
 
 
+def _send_diagnostic_event(
+    dsn: str,
+    *,
+    sdk_debug: bool,
+    timeout: float,
+) -> DeliveryEvidence:
+    """Send one event and record actual SDK transport outcome evidence."""
+    assert telemetry.sentry_sdk is not None
+
+    from sentry_sdk.transport import HttpTransport
+
+    class RecordingHttpTransport(HttpTransport):
+        def __init__(self, options):
+            super().__init__(options)
+            self.response_status: int | None = None
+            self.dropped_reasons: list[str] = []
+
+        def _handle_response(self, response, envelope) -> None:
+            self.response_status = int(response.status)
+            super()._handle_response(response, envelope)
+
+        def on_dropped_event(self, reason: str) -> None:
+            self.dropped_reasons.append(str(reason))
+            super().on_dropped_event(reason)
+
+    telemetry.sentry_sdk.init(
+        dsn=dsn,
+        environment=os.getenv("SENTRY_ENVIRONMENT", "lab"),
+        release=os.getenv("SENTRY_RELEASE"),
+        server_name=os.getenv("SENTRY_SERVER_NAME", "freebsd-laboratory"),
+        send_default_pii=False,
+        include_local_variables=False,
+        include_source_context=False,
+        max_request_body_size="never",
+        traces_sample_rate=None,
+        before_send=telemetry._before_send,
+        debug=sdk_debug,
+        transport=RecordingHttpTransport,
+    )
+
+    with telemetry.sentry_sdk.new_scope() as scope:
+        scope.set_tag("component", "sentry-diagnostics")
+        scope.set_tag("project", "freebsd-laboratory")
+        scope.set_tag("diagnostic", "true")
+        event_id = scope.capture_event(
+            {
+                "level": "error",
+                "message": "FreeBSD Laboratory Sentry diagnostic test event",
+            }
+        )
+
+    telemetry.sentry_sdk.flush(timeout=max(timeout, 2.0))
+    transport = telemetry.sentry_sdk.get_client().transport
+    if not isinstance(transport, RecordingHttpTransport):
+        return DeliveryEvidence(
+            event_id=event_id,
+            http_status=None,
+            dropped_reasons=("unexpected_transport",),
+        )
+    return DeliveryEvidence(
+        event_id=event_id,
+        http_status=transport.response_status,
+        dropped_reasons=tuple(transport.dropped_reasons),
+    )
+
+
+def _delivery_result(evidence: DeliveryEvidence) -> DiagnosticResult:
+    event_suffix = f"; event_id={evidence.event_id}" if evidence.event_id else ""
+    if evidence.http_status is not None and 200 <= evidence.http_status < 300:
+        return _result(
+            "event",
+            "PASS",
+            f"Sentry ingest accepted the envelope with HTTP {evidence.http_status}{event_suffix}",
+        )
+    if evidence.http_status is not None:
+        return _result(
+            "event",
+            "FAIL",
+            f"Sentry ingest returned HTTP {evidence.http_status}{event_suffix}",
+        )
+    if evidence.dropped_reasons:
+        return _result(
+            "event",
+            "FAIL",
+            "SDK transport dropped the event: "
+            + ", ".join(evidence.dropped_reasons)
+            + event_suffix,
+        )
+    if evidence.event_id is None:
+        return _result("event", "FAIL", "SDK did not create an event ID")
+    return _result(
+        "event",
+        "FAIL",
+        "SDK created an event ID but no HTTP delivery response was observed"
+        + event_suffix,
+    )
+
+
+def _attempt_delivery(
+    results: list[DiagnosticResult],
+    dsn: str,
+    *,
+    sdk_debug: bool,
+    timeout: float,
+) -> list[DiagnosticResult]:
+    evidence = _send_diagnostic_event(
+        dsn,
+        sdk_debug=sdk_debug,
+        timeout=timeout,
+    )
+    results.append(_delivery_result(evidence))
+    return results
+
+
 def run_diagnostics(
     *,
     send_test_event: bool = False,
@@ -188,6 +309,13 @@ def run_diagnostics(
                 f"resolver error after {_DNS_ATTEMPTS} attempts: {error}",
             )
         )
+        if send_test_event:
+            return _attempt_delivery(
+                results,
+                dsn,
+                sdk_debug=sdk_debug,
+                timeout=timeout,
+            )
         return results
 
     unique_addresses = sorted({entry[4][0] for entry in addresses})
@@ -207,6 +335,13 @@ def run_diagnostics(
         raw_socket = _connect_resolved(addresses, timeout=timeout)
     except OSError as error:
         results.append(_result("tcp", "FAIL", f"connection error: {error}"))
+        if send_test_event:
+            return _attempt_delivery(
+                results,
+                dsn,
+                sdk_debug=sdk_debug,
+                timeout=timeout,
+            )
         return results
 
     if not target.use_tls:
@@ -222,6 +357,13 @@ def run_diagnostics(
         except (OSError, ssl.SSLError) as error:
             raw_socket.close()
             results.append(_result("tls", "FAIL", f"TLS verification error: {error}"))
+            if send_test_event:
+                return _attempt_delivery(
+                    results,
+                    dsn,
+                    sdk_debug=sdk_debug,
+                    timeout=timeout,
+                )
             return results
         results.append(
             _result("tls", "PASS", f"certificate verification succeeded ({tls_version})")
@@ -232,40 +374,17 @@ def run_diagnostics(
             _result(
                 "event",
                 "SKIP",
-                "use --send-test-event to enqueue and flush a diagnostic event",
+                "use --send-test-event to perform a verified Sentry ingest request",
             )
         )
         return results
 
-    initialized = telemetry.init_sentry("sentry-diagnostics", debug=sdk_debug)
-    if not initialized:
-        results.append(_result("event", "FAIL", "Sentry SDK initialization failed"))
-        return results
-
-    assert telemetry.sentry_sdk is not None
-    with telemetry.sentry_sdk.new_scope() as scope:
-        scope.set_tag("component", "sentry-diagnostics")
-        scope.set_tag("project", "freebsd-laboratory")
-        scope.set_tag("diagnostic", "true")
-        event_id = scope.capture_event(
-            {
-                "level": "error",
-                "message": "FreeBSD Laboratory Sentry diagnostic test event",
-            }
-        )
-
-    telemetry.flush_sentry(timeout=max(timeout, 2.0))
-    if event_id is None:
-        results.append(_result("event", "FAIL", "SDK did not return an event ID"))
-    else:
-        results.append(
-            _result(
-                "event",
-                "PASS",
-                f"event queued and flushed; event_id={event_id}",
-            )
-        )
-    return results
+    return _attempt_delivery(
+        results,
+        dsn,
+        sdk_debug=sdk_debug,
+        timeout=timeout,
+    )
 
 
 def _exit_code(results: list[DiagnosticResult]) -> int:
@@ -279,7 +398,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--send-test-event",
         action="store_true",
-        help="enqueue one diagnostic error event and flush the SDK transport",
+        help="send one diagnostic event and require an actual 2xx Sentry ingest response",
     )
     parser.add_argument(
         "--sdk-debug",
