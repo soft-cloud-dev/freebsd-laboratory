@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import socket
-from contextlib import nullcontext
 from unittest.mock import Mock
 
 from freebsd_laboratory import sentry_diagnostics, telemetry
@@ -169,22 +168,22 @@ def test_dns_failure_reports_bounded_retry_count(monkeypatch) -> None:
     assert resolve.call_count == 3
 
 
-def test_send_test_event_initializes_debug_and_flushes(monkeypatch) -> None:
-    scope = Mock()
-    scope.capture_event.return_value = "event-id-123"
-    sdk = Mock()
-    sdk.new_scope.return_value = nullcontext(scope)
-    monkeypatch.setattr(telemetry, "sentry_sdk", sdk)
+def test_send_test_event_requires_actual_2xx_response(monkeypatch) -> None:
+    monkeypatch.setattr(telemetry, "sentry_sdk", Mock())
     monkeypatch.setenv(
         "SENTRY_DSN",
         "http://public-key@o1.ingest.sentry.io/12345",
     )
     _mock_network(monkeypatch, tls=False)
 
-    init = Mock(return_value=True)
-    flush = Mock()
-    monkeypatch.setattr(telemetry, "init_sentry", init)
-    monkeypatch.setattr(telemetry, "flush_sentry", flush)
+    send = Mock(
+        return_value=sentry_diagnostics.DeliveryEvidence(
+            event_id="event-id-123",
+            http_status=200,
+            dropped_reasons=(),
+        )
+    )
+    monkeypatch.setattr(sentry_diagnostics, "_send_diagnostic_event", send)
 
     results = sentry_diagnostics.run_diagnostics(
         send_test_event=True,
@@ -193,8 +192,65 @@ def test_send_test_event_initializes_debug_and_flushes(monkeypatch) -> None:
     )
 
     assert results[-1].status == "PASS"
+    assert "HTTP 200" in results[-1].detail
     assert "event-id-123" in results[-1].detail
-    init.assert_called_once_with("sentry-diagnostics", debug=True)
-    flush.assert_called_once_with(timeout=7.0)
-    scope.set_tag.assert_any_call("diagnostic", "true")
-    scope.capture_event.assert_called_once()
+    send.assert_called_once_with(
+        "http://public-key@o1.ingest.sentry.io/12345",
+        sdk_debug=True,
+        timeout=7.0,
+    )
+
+
+def test_event_id_without_http_response_is_failure() -> None:
+    result = sentry_diagnostics._delivery_result(
+        sentry_diagnostics.DeliveryEvidence(
+            event_id="event-id-123",
+            http_status=None,
+            dropped_reasons=(),
+        )
+    )
+
+    assert result.status == "FAIL"
+    assert "no HTTP delivery response" in result.detail
+
+
+def test_transport_drop_is_failure() -> None:
+    result = sentry_diagnostics._delivery_result(
+        sentry_diagnostics.DeliveryEvidence(
+            event_id="event-id-123",
+            http_status=None,
+            dropped_reasons=("network",),
+        )
+    )
+
+    assert result.status == "FAIL"
+    assert "network" in result.detail
+
+
+def test_send_is_attempted_even_when_preflight_dns_fails(monkeypatch) -> None:
+    monkeypatch.setattr(telemetry, "sentry_sdk", Mock())
+    monkeypatch.setenv(
+        "SENTRY_DSN",
+        "https://public-key@o1.ingest.sentry.io/12345",
+    )
+    monkeypatch.setattr(
+        sentry_diagnostics,
+        "_resolve_target",
+        Mock(side_effect=socket.gaierror(socket.EAI_NONAME, "Name does not resolve")),
+    )
+    send = Mock(
+        return_value=sentry_diagnostics.DeliveryEvidence(
+            event_id="event-id-123",
+            http_status=None,
+            dropped_reasons=("network",),
+        )
+    )
+    monkeypatch.setattr(sentry_diagnostics, "_send_diagnostic_event", send)
+
+    results = sentry_diagnostics.run_diagnostics(send_test_event=True)
+
+    assert [(item.check, item.status) for item in results[-2:]] == [
+        ("dns", "FAIL"),
+        ("event", "FAIL"),
+    ]
+    send.assert_called_once()
