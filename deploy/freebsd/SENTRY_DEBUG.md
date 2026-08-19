@@ -41,6 +41,8 @@ This is suitable for attaching diagnostic evidence without exposing the DSN cred
 
 ## Fresh FreeBSD bootstrap
 
-The bootstrap installs the FreeBSD native `${PY_TAG}-sentry-sdk` package before creating the host virtual environments. Both virtual environments use `--system-site-packages`, and bootstrap now verifies that `sentry_sdk` is importable from both the root-owned daemon environment and the Jupyter environment.
+The host virtual environments use `--system-site-packages` for FreeBSD-native dependencies such as `certifi` and `urllib3`, but `sentry-sdk` itself is installed directly into each virtual environment at the explicit `LAB_SENTRY_SDK_VERSION` (default `2.66.1`). The bootstrap uses `--ignore-installed` so a system-level `py*-sentry-sdk` package cannot satisfy or contaminate the virtual-environment installation.
+
+After installation, bootstrap verifies both the package version and that `sentry_sdk.__file__` resolves below the expected virtual-environment directory. This prevents a partially upgraded or internally inconsistent `/usr/local/lib/python*/site-packages/sentry_sdk` package from breaking the daemon or Jupyter environment.
 
 The DSN itself remains runtime configuration and is intentionally not stored in the public repository.
