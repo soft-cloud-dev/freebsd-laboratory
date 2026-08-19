@@ -51,7 +51,7 @@ if [ "$SKIP_SOURCE_BUILD" != "YES" ]; then
     make -C "$SRC_DIR" -j "$JOBS" buildworld buildkernel
 fi
 
-BUILD_ID="$BUILD_ID" SRC_DIR="$SRC_DIR" \
+BUILD_ID="$BUILD_ID" SRC_DIR="$SRC_DIR" LAB_JAIL_IMAGE_MODE=source \
     "${SCRIPT_DIR}/build-jail-template.sh"
 
 BUILD_ID="$BUILD_ID" SRC_DIR="$SRC_DIR" \
