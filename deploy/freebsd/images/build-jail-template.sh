@@ -58,6 +58,7 @@ SOURCE_REVISION=""
 RELEASE_URL=""
 RELEASE_MANIFEST_SHA256=""
 BASE_SHA256=""
+TARGET_ABI=""
 
 if ! zfs list -H -o name "$DATASET_PARENT" >/dev/null 2>&1; then
     echo "ZFS template parent does not exist: $DATASET_PARENT" >&2
@@ -190,11 +191,34 @@ else
     make -C "$SRC_DIR" distribution DESTDIR="$ROOT"
 fi
 
-if [ -n "$LAB_PKG_REPOS_DIR" ]; then
-    env ASSUME_ALWAYS_YES=yes pkg -r "$ROOT" -R "$LAB_PKG_REPOS_DIR" install -y $LAB_JAIL_PACKAGES
-else
-    env ASSUME_ALWAYS_YES=yes pkg -r "$ROOT" install -y $LAB_JAIL_PACKAGES
+# pkg must resolve repositories for the userland inside the image, not for the
+# host running the builder.  This is especially important across FreeBSD major
+# upgrades where shared-library SONAMEs change (for example libutil.so.9 -> .10).
+TARGET_ABI_FILE="$ROOT/bin/sh"
+if [ ! -f "$TARGET_ABI_FILE" ]; then
+    echo "Target ABI probe is missing: $TARGET_ABI_FILE" >&2
+    exit 1
 fi
+
+pkg_root()
+{
+    if [ -n "$LAB_PKG_REPOS_DIR" ]; then
+        pkg -o "ABI_FILE=$TARGET_ABI_FILE" -o ASSUME_ALWAYS_YES=yes \
+            -r "$ROOT" -R "$LAB_PKG_REPOS_DIR" "$@"
+    else
+        pkg -o "ABI_FILE=$TARGET_ABI_FILE" -o ASSUME_ALWAYS_YES=yes \
+            -r "$ROOT" "$@"
+    fi
+}
+
+TARGET_ABI=$(pkg -o "ABI_FILE=$TARGET_ABI_FILE" -r "$ROOT" config abi)
+printf 'Target jail package ABI: %s\n' "$TARGET_ABI"
+
+# Never reuse repository metadata selected for the host ABI.  A forced refresh
+# ensures ${ABI} repository templates are expanded for TARGET_ABI before any
+# runtime package is selected.
+pkg_root update -f
+pkg_root install -y $LAB_JAIL_PACKAGES
 
 if ! pw -R "$ROOT" usershow freebsd >/dev/null 2>&1; then
     pw -R "$ROOT" useradd freebsd -m -s /bin/sh -w no
@@ -212,18 +236,21 @@ if ! grep -Eq '^sshd_enable=' "$ROOT/etc/rc.conf"; then
     printf 'sshd_enable="YES"\n' >> "$ROOT/etc/rc.conf"
 fi
 
+PYTHON_LDD=$(chroot "$ROOT" /usr/bin/ldd /usr/local/bin/python3 2>&1 || true)
+if printf '%s\n' "$PYTHON_LDD" | grep -q 'not found'; then
+    printf '%s\n' "$PYTHON_LDD" >&2
+    echo "Jail Python has unresolved shared libraries for target ABI $TARGET_ABI" >&2
+    exit 1
+fi
+
 chroot "$ROOT" /usr/local/bin/python3 -c 'import ipykernel; print(ipykernel.__version__)'
 
 if [ "$LAB_FAIL_ON_PKG_AUDIT" = "YES" ]; then
-    if [ -n "$LAB_PKG_REPOS_DIR" ]; then
-        pkg -r "$ROOT" -R "$LAB_PKG_REPOS_DIR" audit -F
-    else
-        pkg -r "$ROOT" audit -F
-    fi
+    pkg_root audit -F
 fi
 
 USERLAND_VERSION=$(chroot "$ROOT" /bin/freebsd-version -u)
-PACKAGE_LIST=$(pkg -r "$ROOT" query -a '%n-%v' | sort | tr '\n' ' ')
+PACKAGE_LIST=$(pkg_root query -a '%n-%v' | sort | tr '\n' ' ')
 
 install -d -m 0755 "$ROOT/usr/local/share/freebsd-laboratory"
 if [ "$LAB_JAIL_IMAGE_MODE" = "release" ]; then
@@ -239,6 +266,7 @@ if [ "$LAB_JAIL_IMAGE_MODE" = "release" ]; then
   "release_url": "${RELEASE_URL}",
   "release_manifest_sha256": "${RELEASE_MANIFEST_SHA256}",
   "base_sha256": "${BASE_SHA256}",
+  "package_abi": "${TARGET_ABI}",
   "userland": "${USERLAND_VERSION}",
   "packages": "${PACKAGE_LIST}",
   "snapshot": "${SNAPSHOT}"
@@ -253,6 +281,7 @@ else
   "built_at": "${BUILT_AT}",
   "source_branch": "${SOURCE_BRANCH}",
   "source_revision": "${SOURCE_REVISION}",
+  "package_abi": "${TARGET_ABI}",
   "userland": "${USERLAND_VERSION}",
   "packages": "${PACKAGE_LIST}",
   "snapshot": "${SNAPSHOT}"
@@ -273,6 +302,7 @@ trap - EXIT HUP INT TERM
 printf '%s\n' "Built jail golden image:"
 printf '  mode:     %s\n' "$LAB_JAIL_IMAGE_MODE"
 printf '  snapshot: %s\n' "$SNAPSHOT"
+printf '  pkg ABI:  %s\n' "$TARGET_ABI"
 if [ "$LAB_JAIL_IMAGE_MODE" = "release" ]; then
     printf '  release:  %s\n' "$LAB_RELEASE"
     printf '  base:     %s/base.txz\n' "$RELEASE_URL"
