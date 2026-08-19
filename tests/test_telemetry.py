@@ -84,14 +84,31 @@ def test_capture_kernel_error_sends_only_sanitized_class(monkeypatch) -> None:
     event = scope.capture_event.call_args.args[0]
     exception = event["exception"]["values"][0]
     assert event["level"] == "error"
-    assert exception["type"] == "ValueError_Authorization_secret-token"
+    assert exception["type"] == "KernelExecutionError"
     assert exception["value"] == "Kernel execution failed"
+    assert "secret-token" not in str(event)
     assert "hunter2" not in str(event)
     assert "private.ipynb" not in str(event)
     assert "traceback" not in event
     scope.set_tag.assert_any_call("component", "jupyter-kernel")
     scope.set_tag.assert_any_call("operation", "kernel:execute")
     assert all(call.args[0] != "kernel_name" for call in scope.set_tag.call_args_list)
+
+
+def test_capture_kernel_error_preserves_valid_exception_class(monkeypatch) -> None:
+    scope = Mock()
+    scope.capture_event.return_value = "event-id"
+    monkeypatch.setattr(telemetry.sentry_sdk, "is_initialized", lambda: True)
+    monkeypatch.setattr(
+        telemetry.sentry_sdk,
+        "new_scope",
+        lambda: nullcontext(scope),
+    )
+
+    telemetry.capture_kernel_error("ZeroDivisionError", "division by zero")
+
+    event = scope.capture_event.call_args.args[0]
+    assert event["exception"]["values"][0]["type"] == "ZeroDivisionError"
 
 
 def test_capture_kernel_error_is_disabled_without_dsn(monkeypatch) -> None:
