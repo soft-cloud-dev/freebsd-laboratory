@@ -36,6 +36,23 @@ def test_bootstrap_honors_pyproject_build_requirements() -> None:
     assert '"$JUPYTER_VENV/bin/python" -m pip install \\\n    --no-deps -e "$LAB_REPO_DIR"' in text
 
 
+def test_bootstrap_creates_venv_local_jupyter_entrypoints() -> None:
+    text = bootstrap_text()
+    assert 'install_python_entrypoint "$JUPYTER_VENV/bin/jupyter" jupyter_core.command main' in text
+    assert (
+        'install_python_entrypoint "$JUPYTER_VENV/bin/jupyter-server" '
+        'jupyter_server.serverapp main'
+    ) in text
+    assert 'install_python_entrypoint "$JUPYTER_VENV/bin/jupyter-lab" jupyterlab.labapp main' in text
+    assert (
+        'install_python_entrypoint "$JUPYTER_VENV/bin/jupyter-labextension" '
+        'jupyterlab.labextensions main'
+    ) in text
+    assert text.index('install_python_entrypoint "$JUPYTER_VENV/bin/jupyter"') < text.index(
+        'HOME="$JUPYTER_HOME" "$JUPYTER_VENV/bin/jupyter" server extension enable'
+    )
+
+
 def test_bootstrap_prepares_user_owned_jupyter_paths() -> None:
     text = bootstrap_text()
     assert '"$JUPYTER_HOME/.local/share/jupyter/kernels"' in text

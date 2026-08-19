@@ -20,6 +20,20 @@ is_yes()
     esac
 }
 
+install_python_entrypoint()
+{
+    entrypoint_path=$1
+    entrypoint_module=$2
+    entrypoint_callable=$3
+
+    {
+        printf '#!%s\n' "$JUPYTER_VENV/bin/python"
+        printf 'from %s import %s\n' "$entrypoint_module" "$entrypoint_callable"
+        printf '%s()\n' "$entrypoint_callable"
+    } > "$entrypoint_path"
+    chmod 0755 "$entrypoint_path"
+}
+
 if [ "$(uname -s)" != "FreeBSD" ]; then
     fail "bootstrap.sh requires FreeBSD"
 fi
@@ -168,6 +182,12 @@ rm -rf "$JUPYTER_VENV"
 $PYTHON -m venv --system-site-packages "$JUPYTER_VENV"
 "$JUPYTER_VENV/bin/python" -m pip install \
     --no-deps -e "$LAB_REPO_DIR"
+
+"$JUPYTER_VENV/bin/python" -c 'import jupyter_core, jupyter_server, jupyterlab'
+install_python_entrypoint "$JUPYTER_VENV/bin/jupyter" jupyter_core.command main
+install_python_entrypoint "$JUPYTER_VENV/bin/jupyter-server" jupyter_server.serverapp main
+install_python_entrypoint "$JUPYTER_VENV/bin/jupyter-lab" jupyterlab.labapp main
+install_python_entrypoint "$JUPYTER_VENV/bin/jupyter-labextension" jupyterlab.labextensions main
 
 log "Building and registering the JupyterLab extension"
 (
