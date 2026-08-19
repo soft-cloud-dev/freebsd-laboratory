@@ -54,7 +54,20 @@ evidence:
 def test_signed_manifest_authenticates_artifact_hashes(tmp_path: Path) -> None:
     private_key, public_key = write_keys(tmp_path)
     service = make_signed_service(tmp_path, private_key)
-    service.record_client_event("cell-executed", {"cell_id": "a", "success": True})
+    service.record_client_event(
+        "cell-executed",
+        {
+            "notebook": "Signed.ipynb",
+            "cell_id": "a",
+            "success": True,
+            "cell": {
+                "cell_type": "code",
+                "source": "print('signed')\n",
+                "execution_count": 1,
+                "output_count": 0,
+            },
+        },
+    )
 
     result = service.export()
     bundle = Path(result["path"])
