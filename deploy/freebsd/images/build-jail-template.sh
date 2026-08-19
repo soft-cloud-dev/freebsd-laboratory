@@ -19,6 +19,7 @@ JAIL_MOUNT_ROOT=${JAIL_MOUNT_ROOT:-/usr/local/jails/templates}
 LAB_JAIL_PACKAGES=${LAB_JAIL_PACKAGES:-"python311 py311-ipykernel"}
 LAB_PKG_REPOS_DIR=${LAB_PKG_REPOS_DIR:-}
 LAB_FAIL_ON_PKG_AUDIT=${LAB_FAIL_ON_PKG_AUDIT:-YES}
+LAB_PKG_AUDIT_ALLOWED_VULN_IDS=${LAB_PKG_AUDIT_ALLOWED_VULN_IDS-}
 SRC_DIR=${SRC_DIR:-/usr/src}
 LAB_RELEASE=${LAB_RELEASE:-}
 LAB_RELEASE_BASE_URL=${LAB_RELEASE_BASE_URL:-https://download.freebsd.org/releases}
@@ -34,7 +35,7 @@ case "$LAB_JAIL_IMAGE_MODE" in
         ;;
 esac
 
-for command in pkg pw zfs chroot install tar sha256; do
+for command in pkg pw zfs chroot install tar sha256 mktemp; do
     if ! command -v "$command" >/dev/null 2>&1; then
         echo "Required command is unavailable: $command" >&2
         exit 1
@@ -211,6 +212,57 @@ pkg_root()
     fi
 }
 
+pkg_audit_root()
+{
+    AUDIT_OUTPUT=$(mktemp /tmp/freebsd-lab-pkg-audit.XXXXXX)
+    AUDIT_STATUS=0
+    if pkg_root audit -F >"$AUDIT_OUTPUT" 2>&1; then
+        cat "$AUDIT_OUTPUT"
+        rm -f "$AUDIT_OUTPUT"
+        return 0
+    else
+        AUDIT_STATUS=$?
+    fi
+    cat "$AUDIT_OUTPUT"
+
+    if [ "$LAB_FAIL_ON_PKG_AUDIT" != "YES" ]; then
+        echo "WARNING: pkg audit findings were not enforced because LAB_FAIL_ON_PKG_AUDIT=$LAB_FAIL_ON_PKG_AUDIT" >&2
+        rm -f "$AUDIT_OUTPUT"
+        return 0
+    fi
+
+    if [ -z "$LAB_PKG_AUDIT_ALLOWED_VULN_IDS" ]; then
+        rm -f "$AUDIT_OUTPUT"
+        return "$AUDIT_STATUS"
+    fi
+
+    PROBLEM_COUNT=$(sed -n 's/^\([0-9][0-9]*\) problem(s).*$/\1/p' "$AUDIT_OUTPUT" | tail -1)
+    WWW_COUNT=$(grep -c '^WWW:[[:space:]]' "$AUDIT_OUTPUT" || true)
+    VUXML_IDS=$(sed -n 's#^WWW:[[:space:]]*https://vuxml\.FreeBSD\.org/freebsd/\([0-9A-Fa-f-][0-9A-Fa-f-]*\)\.html[[:space:]]*$#\1#p' "$AUDIT_OUTPUT" | sort -u)
+    VUXML_COUNT=$(printf '%s\n' "$VUXML_IDS" | awk 'NF {count++} END {print count+0}')
+
+    if [ -z "$PROBLEM_COUNT" ] || [ "$WWW_COUNT" -ne "$PROBLEM_COUNT" ] || [ "$VUXML_COUNT" -ne "$PROBLEM_COUNT" ]; then
+        echo "pkg audit output could not be reduced to exact FreeBSD VuXML findings; refusing the exception" >&2
+        rm -f "$AUDIT_OUTPUT"
+        return "$AUDIT_STATUS"
+    fi
+
+    for VUXML_ID in $VUXML_IDS; do
+        case " $LAB_PKG_AUDIT_ALLOWED_VULN_IDS " in
+            *" $VUXML_ID "*) ;;
+            *)
+                echo "Unapproved pkg audit finding: $VUXML_ID" >&2
+                rm -f "$AUDIT_OUTPUT"
+                return "$AUDIT_STATUS"
+                ;;
+        esac
+    done
+
+    echo "WARNING: accepting only explicitly allowlisted FreeBSD VuXML findings: $VUXML_IDS" >&2
+    rm -f "$AUDIT_OUTPUT"
+    return 0
+}
+
 TARGET_ABI=$(pkg -o "ABI_FILE=$TARGET_ABI_FILE" -r "$ROOT" config abi)
 printf 'Target jail package ABI: %s\n' "$TARGET_ABI"
 
@@ -261,9 +313,7 @@ fi
 
 chroot "$ROOT" /usr/local/bin/python3 -c 'import ipykernel; print(ipykernel.__version__)'
 
-if [ "$LAB_FAIL_ON_PKG_AUDIT" = "YES" ]; then
-    pkg_root audit -F
-fi
+pkg_audit_root
 
 USERLAND_VERSION=$(chroot "$ROOT" /bin/freebsd-version -u)
 PACKAGE_LIST=$(pkg_root query -a '%n-%v' | sort | tr '\n' ' ')

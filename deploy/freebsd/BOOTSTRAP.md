@@ -33,6 +33,7 @@ official FreeBSD X.Y-RELEASE base.txz
   -> derive pkg ABI from the target jail userland
   -> refresh package catalogues for that target ABI
   -> pkg install python3 + matching ipykernel
+  -> initialize target-root dynamic linker hints
   -> validate Python shared-library resolution
   -> create the freebsd runtime account
   -> install the restricted SSH policy
@@ -44,7 +45,7 @@ official FreeBSD X.Y-RELEASE base.txz
 
 The release is derived from the host userland, for example `15.1-RELEASE-p2 -> 15.1-RELEASE`. The official distribution path is derived automatically on amd64 and aarch64. The downloaded `MANIFEST` and `base.txz` are cached under `/var/cache/freebsd-laboratory/releases` and the archive is reused only if its SHA-256 still matches the current official MANIFEST.
 
-Package resolution is deliberately tied to the target image rather than the host builder. The builder points pkg's `ABI_FILE` at the target root's `/bin/sh`, forces a catalogue refresh, and records the resolved ABI in `image-manifest.json`. Before a snapshot can be created, `ldd` must show no unresolved dependency for `/usr/local/bin/python3`. This catches stale or cross-major packages such as a Python binary requiring `libutil.so.9` inside a FreeBSD 15 userland that provides `libutil.so.10`. The builder fails closed; it does not create compatibility symlinks between different shared-library major versions.
+Package resolution is deliberately tied to the target image rather than the host builder. The builder points pkg's `ABI_FILE` at the target root's `/bin/sh`, forces a catalogue refresh, and records the resolved ABI in `image-manifest.json`. After package installation it runs the target root's `/etc/rc.d/ldconfig onestart`, so `/usr/local/lib` is present in the target ELF hints before validation. Before a snapshot can be created, `ldd` must show no unresolved dependency for `/usr/local/bin/python3`. This catches stale or cross-major packages such as a Python binary requiring `libutil.so.9` inside a FreeBSD 15 userland that provides `libutil.so.10`. The builder fails closed; it does not create compatibility symlinks between different shared-library major versions.
 
 The resulting snapshot is mode-specific, for example:
 
@@ -53,6 +54,25 @@ zroot/jails/templates/freebsd-python-release-20260819T014500Z@clean
 ```
 
 The complete bootstrap then configures the rc.d daemon, VNET bridge, PF anchor, SSH transport, activates that exact snapshot, and runs a real jail smoke test requiring both `security.jail.jailed=1` and `vnet0`.
+
+## Package audit policy
+
+The jail-image builder runs `pkg audit -F` after Python and ipykernel validation. The default remains fail-closed: any reported vulnerability prevents creation of the `@clean` snapshot.
+
+When the FreeBSD package repository has no non-vulnerable package version available yet, an operator may accept specific FreeBSD VuXML records without disabling the audit globally. Set `LAB_PKG_AUDIT_ALLOWED_VULN_IDS` to a space-separated list of exact VuXML IDs. The builder accepts the audit only when every reported problem maps one-to-one to a VuXML URL and every resulting ID is on that list. Any additional or unparseable finding still fails the build.
+
+For the Python findings reported by the FreeBSD 15.1 package repository on 2026-08-19, the temporary scoped exception is:
+
+```sh
+LAB_PKG_AUDIT_ALLOWED_VULN_IDS="6d3488ae-2e0f-11f1-88c7-00a098b42aeb 0be929a5-2e0f-11f1-88c7-00a098b42aeb" \
+LAB_JUPYTER_USER=freebsd \
+LAB_REBUILD_JAIL_IMAGE=YES \
+  ./deploy/freebsd/bootstrap.sh
+```
+
+This does not suppress future findings. If `pkg audit` reports a third problem, a different VuXML record, or output that cannot be reduced to exact VuXML IDs, the builder stops. Remove the exception as soon as the FreeBSD package repository provides a package that passes the audit without it.
+
+`LAB_FAIL_ON_PKG_AUDIT=NO` remains available only for diagnostics. It disables the release gate for all findings and should not be used for an activated laboratory golden image.
 
 ## Source/reproducible bootstrap mode
 
@@ -73,6 +93,7 @@ git checkout releng/X.Y
   -> make distribution DESTDIR=<ZFS jail root>
   -> resolve packages against the target userland ABI
   -> pkg install python3 + matching ipykernel
+  -> initialize target-root dynamic linker hints
   -> validate Python shared-library resolution
   -> SSH/runtime configuration
   -> provenance manifest with source branch + exact Git revision
@@ -137,6 +158,9 @@ LAB_JAIL_IMAGE_MODE      release (default) or source
 LAB_BUILD_JAIL_IMAGE     YES by default
 LAB_REBUILD_JAIL_IMAGE   YES to build a new mode-specific snapshot
 LAB_SMOKE_TEST           YES by default when a jail image is active
+LAB_FAIL_ON_PKG_AUDIT    YES by default; NO is diagnostic-only
+LAB_PKG_AUDIT_ALLOWED_VULN_IDS
+                         exact space-separated FreeBSD VuXML IDs allowed by the audit gate
 
 Release mode:
 LAB_RELEASE              official X.Y-RELEASE; normally derived from the host

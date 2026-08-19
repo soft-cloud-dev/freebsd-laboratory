@@ -136,6 +136,22 @@ def test_jail_builder_resolves_packages_against_target_abi() -> None:
     assert 'ln -s /lib/libutil' not in text
 
 
+def test_jail_builder_audit_exceptions_are_exact_and_fail_closed() -> None:
+    text = jail_builder_text()
+    assert 'LAB_FAIL_ON_PKG_AUDIT=${LAB_FAIL_ON_PKG_AUDIT:-YES}' in text
+    assert 'LAB_PKG_AUDIT_ALLOWED_VULN_IDS=${LAB_PKG_AUDIT_ALLOWED_VULN_IDS-}' in text
+    assert 'AUDIT_STATUS=0' in text
+    assert 'else\n        AUDIT_STATUS=$?' in text
+    assert 'PROBLEM_COUNT=$(sed -n' in text
+    assert "WWW_COUNT=$(grep -c '^WWW:[[:space:]]'" in text
+    assert 'VUXML_IDS=$(sed -n' in text
+    assert 'Unapproved pkg audit finding: $VUXML_ID' in text
+    assert 'pkg audit output could not be reduced to exact FreeBSD VuXML findings' in text
+    assert 'accepting only explicitly allowlisted FreeBSD VuXML findings' in text
+    assert 'pkg_audit_root' in text
+    assert 'pkg_root audit -F' in text
+
+
 def test_source_mode_retains_buildworld_installworld_pipeline() -> None:
     bootstrap = bootstrap_text()
     builder = jail_builder_text()
