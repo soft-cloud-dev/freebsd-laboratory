@@ -183,7 +183,8 @@ $PYTHON -m venv --system-site-packages "$JUPYTER_VENV"
 "$JUPYTER_VENV/bin/python" -m pip install \
     --no-deps -e "$LAB_REPO_DIR"
 
-"$JUPYTER_VENV/bin/python" -c 'import jupyter_core, jupyter_server, jupyterlab'
+"$JUPYTER_VENV/bin/python" -c \
+    'import freebsd_laboratory, jupyter_core, jupyter_server, jupyterlab'
 install_python_entrypoint "$JUPYTER_VENV/bin/jupyter" jupyter_core.command main
 install_python_entrypoint "$JUPYTER_VENV/bin/jupyter-server" jupyter_server.serverapp main
 install_python_entrypoint "$JUPYTER_VENV/bin/jupyter-lab" jupyterlab.labapp main
@@ -195,10 +196,40 @@ log "Building and registering the JupyterLab extension"
     npm install --no-audit --no-fund
     npm run build
 )
-HOME="$JUPYTER_HOME" "$JUPYTER_VENV/bin/jupyter" server extension enable \
-    --py freebsd_laboratory --sys-prefix
-HOME="$JUPYTER_HOME" "$JUPYTER_VENV/bin/jupyter" labextension develop \
-    "$LAB_REPO_DIR/labextension" --overwrite
+
+LABEXT_OUTPUT="$LAB_REPO_DIR/labextension/labextension"
+[ -f "$LABEXT_OUTPUT/package.json" ] || fail "Prebuilt JupyterLab extension package.json is missing"
+[ -d "$LABEXT_OUTPUT/static" ] || fail "Prebuilt JupyterLab extension static bundle is missing"
+LABEXT_NAME=$("$JUPYTER_VENV/bin/python" -c \
+    'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["name"])' \
+    "$LABEXT_OUTPUT/package.json")
+case "$LABEXT_NAME" in
+    @*/*|[A-Za-z0-9_-]*) ;;
+    *) fail "Unsupported JupyterLab extension package name: $LABEXT_NAME" ;;
+esac
+LABEXT_DEST="$JUPYTER_VENV/share/jupyter/labextensions/$LABEXT_NAME"
+install -d -m 0755 "$(dirname "$LABEXT_DEST")"
+rm -rf "$LABEXT_DEST"
+ln -s "$LABEXT_OUTPUT" "$LABEXT_DEST"
+
+SERVER_EXTENSION_CONFIG_DIR="$JUPYTER_VENV/etc/jupyter/jupyter_server_config.d"
+install -d -m 0755 "$SERVER_EXTENSION_CONFIG_DIR"
+cat > "$SERVER_EXTENSION_CONFIG_DIR/freebsd_laboratory.json" <<'EOF'
+{
+  "ServerApp": {
+    "jpserver_extensions": {
+      "freebsd_laboratory": true
+    }
+  }
+}
+EOF
+"$JUPYTER_VENV/bin/python" - <<'PY'
+from jupyter_server.extension.manager import ExtensionPackage
+
+extension = ExtensionPackage(name="freebsd_laboratory", enabled=True)
+if not extension.validate():
+    raise SystemExit("freebsd_laboratory server extension validation failed")
+PY
 
 for path in \
     "$JUPYTER_HOME/.local" \
