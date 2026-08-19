@@ -18,7 +18,7 @@ jobs:
       - run: python -m pip install --upgrade pip
       - run: python -m pip install -e ".[dev]"
       - run: python -m compileall -q freebsd_laboratory tests
-      - run: ruff check freebsd_laboratory tests
+      - run: ruff check --select E,F freebsd_laboratory tests
       - name: Validate FreeBSD shell assets
         run: |
           test -x deploy/freebsd/bootstrap.sh
