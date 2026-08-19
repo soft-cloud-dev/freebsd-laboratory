@@ -19,22 +19,24 @@ The command checks, in order:
 5. TCP connectivity to one of the addresses returned by that DNS lookup, without performing a second hostname lookup.
 6. TLS certificate verification for HTTPS DSNs, requiring TLS 1.2 or newer.
 
-The DNS check performs three bounded attempts for transient `EAI_AGAIN` or `EAI_NONAME` failures. A failed check exits with status 1. A read-only successful run reports the event check as `SKIP`.
+The DNS check performs three bounded attempts for transient `EAI_AGAIN` or `EAI_NONAME` failures. A failed check exits with status 1. A read-only run never emits a Sentry event and reports the event check as `SKIP`.
 
-## End-to-end test event
+## Verified end-to-end test event
 
 ```sh
 .venv/bin/freebsd-lab-sentry-diagnose --send-test-event --sdk-debug
 ```
 
-This initializes the existing project telemetry configuration, emits one event tagged with `component=sentry-diagnostics` and `diagnostic=true`, flushes the SDK transport, and prints only the resulting event ID. The DSN credentials are never printed by the diagnostic command.
+This sends one standalone diagnostic error event tagged with `component=sentry-diagnostics` and `diagnostic=true`. The diagnostic uses an instrumented Sentry HTTP transport and reports `PASS` only after the Sentry ingest endpoint returns an HTTP 2xx response. Merely obtaining an SDK event ID or flushing the worker queue is not treated as proof of delivery.
+
+If the DNS/TCP/TLS preflight fails, `--send-test-event` still attempts the real SDK delivery so the output can distinguish preflight instability from the actual Sentry transport result. Transport drops such as `network`, rate limiting, and non-2xx ingest responses are reported as `FAIL`.
 
 `--sdk-debug` enables Sentry SDK internal diagnostic logging for this standalone process. It does not change normal Jupyter Server or runtime-daemon logging.
 
 ## Machine-readable output
 
 ```sh
-.venv/bin/freebsd-lab-sentry-diagnose --json
+.venv/bin/freebsd-lab-sentry-diagnose --send-test-event --json
 ```
 
 This is suitable for attaching diagnostic evidence without exposing the DSN credentials.
