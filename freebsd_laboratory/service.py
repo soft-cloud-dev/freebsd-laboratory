@@ -91,7 +91,13 @@ def redact_payload(value: Any) -> Any:
     if isinstance(value, (list, tuple)):
         return [redact_payload(item) for item in value]
     if isinstance(value, (set, frozenset)):
-        return [redact_payload(item) for item in sorted(value, key=str)]
+        items: list[tuple[tuple[str, bytes], Any]] = []
+        for item in value:
+            redacted = redact_payload(item)
+            type_name = f"{type(item).__module__}.{type(item).__qualname__}"
+            items.append(((type_name, canonical_json(redacted)), redacted))
+        items.sort(key=lambda entry: entry[0])
+        return [redacted for _, redacted in items]
     return value
 
 
@@ -229,10 +235,13 @@ class LabService:
         key_path = signing.get("private_key")
         if not isinstance(key_path, str) or not key_path:
             raise ValueError("evidence.signing.private_key is required when signing is enabled")
-        path = Path(key_path).expanduser()
-        if not path.is_absolute():
-            path = (self.root_dir / path).resolve()
-        if path.is_symlink() or not path.is_file():
+        raw_path = Path(key_path).expanduser()
+        if not raw_path.is_absolute():
+            raw_path = self.root_dir / raw_path
+        if raw_path.is_symlink():
+            raise ValueError(f"evidence.signing.private_key is unavailable: {raw_path}")
+        path = raw_path.resolve()
+        if not path.is_file():
             raise ValueError(f"evidence.signing.private_key is unavailable: {path}")
         key_id = signing.get("key_id", path.name)
         if not isinstance(key_id, str) or not key_id:

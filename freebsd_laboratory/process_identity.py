@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import hashlib
 import os
-import shutil
 import subprocess
 from dataclasses import dataclass
 
 
-PS_COMMAND = shutil.which("ps") or "/bin/ps"
+# This root-daemon helper must not select an executable from inherited PATH.
+# /bin/ps is present on the supported FreeBSD hosts and Ubuntu CI runners.
+PS_COMMAND = "/bin/ps"
 
 
 @dataclass(frozen=True)

@@ -856,6 +856,14 @@ class ThreadingUnixServer(socketserver.ThreadingMixIn, socketserver.UnixStreamSe
 
 
 def _configure_socket(path: Path, group_name: str) -> None:
+    """Grant the configured Jupyter group access to the root daemon socket.
+
+    Mode 0660 is intentional: the unprivileged Jupyter service must connect as
+    a member of the configured group. Filesystem access only permits a
+    connection; RuntimeRequestHandler authorizes every request using kernel
+    supplied LOCAL_PEERCRED before any privileged action is performed.
+    """
+
     try:
         group = grp.getgrnam(group_name)
     except KeyError as error:

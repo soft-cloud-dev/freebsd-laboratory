@@ -76,7 +76,6 @@ def rewrite_connection_file(
     """Bind the Jupyter connection document to leased loopback tunnel ports."""
 
     try:
-        import ipaddress
         ipaddress.ip_address(bind_ip)
     except ValueError as error:
         raise ValueError(f"Invalid bind_ip: {bind_ip}") from error

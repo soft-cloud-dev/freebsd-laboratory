@@ -17,6 +17,7 @@ from .remote_kernel import (
     LocalPortLeasePool,
     LocalPortReservation,
     SSHTransport,
+    connection_ports,
     release_jupyter_cached_ports,
     remote_kernel_command,
     restore_connection_file,
@@ -32,6 +33,18 @@ def runtime_name(kernel_id: str) -> str:
     if not compact:
         raise ValueError("kernel_id does not contain a usable identifier")
     return f"freebsd-lab-{compact[:16]}"
+
+
+def persisted_connection_ports(value: object) -> tuple[int, ...]:
+    """Accept only a complete, valid persisted Jupyter port tuple."""
+
+    if not isinstance(value, (list, tuple)):
+        return ()
+    try:
+        document = dict(zip(CONNECTION_PORT_FIELDS, value, strict=True))
+        return connection_ports(document)
+    except ValueError:
+        return ()
 
 
 class RemoteRuntimeProvisioner(LocalProvisioner):
@@ -300,27 +313,9 @@ class RemoteRuntimeProvisioner(LocalProvisioner):
         self._runtime_created = bool(provisioner_info.get("runtime_created"))
         original_ip = provisioner_info.get("original_connection_ip")
         self._original_connection_ip = str(original_ip) if isinstance(original_ip, str) and original_ip else None
-        original_ports = provisioner_info.get("original_connection_ports", [])
-        if isinstance(original_ports, (list, tuple)):
-            self._original_connection_ports = tuple(
-                int(value)
-                for value in original_ports
-                if not isinstance(value, bool)
-                and isinstance(value, (int, str))
-                and str(value).isdigit()
-                and 1 <= int(value) <= 65535
-            )
-        else:
-            self._original_connection_ports = ()
-        tunnel_ports = provisioner_info.get("tunnel_ports", [])
-        if isinstance(tunnel_ports, (list, tuple)):
-            self._tunnel_ports = tuple(
-                int(value)
-                for value in tunnel_ports
-                if not isinstance(value, bool)
-                and isinstance(value, (int, str))
-                and str(value).isdigit()
-                and 1 <= int(value) <= 65535
-            )
-        else:
-            self._tunnel_ports = ()
+        self._original_connection_ports = persisted_connection_ports(
+            provisioner_info.get("original_connection_ports", [])
+        )
+        self._tunnel_ports = persisted_connection_ports(
+            provisioner_info.get("tunnel_ports", [])
+        )

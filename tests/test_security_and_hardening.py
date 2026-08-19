@@ -11,15 +11,12 @@ import pytest
 
 from freebsd_laboratory.network import IPv4LeasePool
 from freebsd_laboratory.process_identity import (
-    ProcessIdentity,
     _pid_exists,
     process_matches,
-    query_process_identity,
 )
 from freebsd_laboratory.runtime_daemon import (
     RuntimeConfig,
     RuntimeManager,
-    RuntimeOwner,
     _configure_socket,
 )
 from freebsd_laboratory.ssh_transport import SSHTransport
@@ -572,8 +569,6 @@ def test_daemon_socket_ipc_concurrency_and_abrupt_disconnects(tmp_path: Path) ->
     import uuid
     from freebsd_laboratory.peer_credentials import PeerCredentials
     from freebsd_laboratory.runtime_daemon import (
-        RuntimeConfig,
-        RuntimeManager,
         RuntimeRequestHandler,
         ThreadingUnixServer,
     )
@@ -779,10 +774,7 @@ def test_peer_credentials_comprehensive_checks() -> None:
 
 
 def test_runtime_daemon_gc_and_socket_hardening(tmp_path: Path) -> None:
-    from freebsd_laboratory.runtime_daemon import (
-        _configure_socket,
-        _prepare_socket_path,
-    )
+    from freebsd_laboratory.runtime_daemon import _prepare_socket_path
 
     manager = make_manager(tmp_path)
 
@@ -866,7 +858,7 @@ def test_remote_provisioner_hardening(tmp_path: Path) -> None:
         "guest_ip": "172.31.254.10",
     }))
     assert prov._original_connection_ports == ()
-    assert prov._tunnel_ports == (30001,)
+    assert prov._tunnel_ports == ()
     assert prov.guest_ip == "172.31.254.10"
 
 
@@ -1084,11 +1076,11 @@ notebook: Test.ipynb
     # 3. Symlinked private key in signing config
     key_file = tmp_path / "priv.pem"
     key_file.touch()
-    sym_key = tmp_path / "sym_priv.pem"
-    sym_key.symlink_to(key_file)
+    relative_key_link = tmp_path / "relative-key-link.pem"
+    relative_key_link.symlink_to(key_file)
 
     signing_lab = tmp_path / "signing_lab.yaml"
-    signing_lab.write_text(f"""\
+    signing_lab.write_text("""\
 schema: softcloud.lab/v1
 id: test-lab
 title: Test
@@ -1097,7 +1089,7 @@ evidence:
   signing:
     enabled: true
     algorithm: ed25519
-    private_key: {sym_key}
+    private_key: relative-key-link.pem
 """, encoding="utf-8")
 
     service = LabService(tmp_path, "signing_lab.yaml", ".evidence")
@@ -1257,8 +1249,8 @@ def test_remote_provisioner_load_info_guards_boolean_name_and_invalid_ports() ->
     assert prov.guest_ip is None
     assert prov.known_hosts_file is None
     assert prov._original_connection_ip is None
-    assert prov._original_connection_ports == (2000,)
-    assert prov._tunnel_ports == (3000,)
+    assert prov._original_connection_ports == ()
+    assert prov._tunnel_ports == ()
 
 
 def test_remote_connection_symlink_rejection(tmp_path: Path) -> None:
@@ -1345,6 +1337,4 @@ def test_verify_bundle_rejects_symlinked_or_nonexistent_bundle_dir(tmp_path: Pat
 
     with pytest.raises(ValueError, match="Evidence bundle must not be a symbolic link"):
         verify_bundle(sym_bundle)
-
-
 
