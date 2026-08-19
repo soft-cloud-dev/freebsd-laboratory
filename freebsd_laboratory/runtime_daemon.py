@@ -180,6 +180,15 @@ class RuntimeManager:
         if not isinstance(owner_uid, int) or owner_uid != requester_uid:
             raise PermissionError("Runtime is owned by another Unix user")
 
+    @staticmethod
+    def _record_owned_by(record: dict[str, Any], owner: RuntimeOwner) -> bool:
+        return (
+            record.get("owner_pid") == owner.pid
+            and record.get("owner_uid") == owner.uid
+            and record.get("owner_gid") == owner.gid
+            and record.get("owner_process_digest") == owner.process_digest
+        )
+
     def _registry_path(self, name: str) -> Path:
         return self.registry_dir / f"{name}.json"
 
@@ -279,6 +288,35 @@ class RuntimeManager:
             raise RuntimeError("Address pool contains the host bridge address")
         return address
 
+    def _jail_dataset(self, name: str) -> str:
+        return f"{self.config.jail_dataset_parent.rstrip('/')}/{name}"
+
+    def _reconcile_registered_before_create(self, name: str, owner: RuntimeOwner) -> None:
+        record = self._load_registry(name)
+        if record is None:
+            return
+        if not self._record_owned_by(record, owner):
+            raise RuntimeError(f"Runtime already registered: {name}")
+        self.destroy(name, requester_uid=owner.uid)
+        if self._load_registry(name) is not None:
+            raise RuntimeError(f"Runtime cleanup incomplete before recreate: {name}")
+
+    def _reconcile_orphaned_jail_before_create(self, name: str, dataset: str) -> None:
+        if self._load_registry(name) is not None:
+            return
+        if not self._jail_exists(name) and not self._dataset_exists(dataset):
+            return
+        self.destroy(name, force=True)
+        remaining: list[str] = []
+        if self._jail_exists(name):
+            remaining.append(f"jail:{name}")
+        if self._dataset_exists(dataset):
+            remaining.append(f"dataset:{dataset}")
+        if remaining:
+            raise RuntimeError(
+                f"Unable to reconcile orphaned runtime {name}: {', '.join(remaining)}"
+            )
+
     def _install_jail_authorized_key(self, jail_root: str) -> None:
         public_key = Path(self.config.ssh_public_key)
         if not public_key.is_file():
@@ -324,11 +362,11 @@ class RuntimeManager:
     ) -> dict[str, Any]:
         name = self.validate_name(name)
         owner = self._owner_from_peer(peer, owner_pid)
-        if self._load_registry(name) is not None:
-            raise RuntimeError(f"Runtime already registered: {name}")
+        self._reconcile_registered_before_create(name, owner)
 
+        dataset = self._jail_dataset(name)
+        self._reconcile_orphaned_jail_before_create(name, dataset)
         self._ensure_bridge()
-        dataset = f"{self.config.jail_dataset_parent.rstrip('/')}/{name}"
         jail_root = str((Path(self.config.jail_mount_root) / name).resolve())
         address = self._allocate(name)
         record: dict[str, Any] = {
@@ -443,8 +481,7 @@ class RuntimeManager:
         name = self.validate_name(name)
         owner = self._owner_from_peer(peer, owner_pid)
         self._require_vm_backend()
-        if self._load_registry(name) is not None:
-            raise RuntimeError(f"Runtime already registered: {name}")
+        self._reconcile_registered_before_create(name, owner)
         if not Path(self.config.ssh_public_key).is_file():
             raise RuntimeError(f"Runtime SSH public key is unavailable: {self.config.ssh_public_key}")
 
@@ -515,6 +552,9 @@ class RuntimeManager:
     def _dataset_exists(self, dataset: str) -> bool:
         return self._run(["zfs", "list", "-H", "-o", "name", dataset], check=False).returncode == 0
 
+    def _interface_exists(self, interface: str) -> bool:
+        return self._run(["ifconfig", interface], check=False).returncode == 0
+
     def destroy(
         self,
         name: str,
@@ -552,11 +592,25 @@ class RuntimeManager:
 
         dataset = record.get("dataset")
         if not isinstance(dataset, str) or not dataset:
-            dataset = f"{self.config.jail_dataset_parent.rstrip('/')}/{name}"
+            dataset = self._jail_dataset(name)
         if self._dataset_exists(dataset):
             result = self._run(["zfs", "destroy", "-r", dataset], check=False, timeout=60)
             if result.returncode == 0:
                 removed.append(dataset)
+
+        remaining: list[str] = []
+        if self._vm_exists(name):
+            remaining.append("bhyve")
+        if self._jail_exists(name):
+            remaining.append("jail")
+        if isinstance(epair_host, str) and epair_host and self._interface_exists(epair_host):
+            remaining.append(epair_host)
+        if self._dataset_exists(dataset):
+            remaining.append(dataset)
+        if remaining:
+            raise RuntimeError(
+                f"Runtime cleanup incomplete for {name}: {', '.join(remaining)}"
+            )
 
         guest_ip = record.get("guest_ip")
         if isinstance(guest_ip, str) and guest_ip:
