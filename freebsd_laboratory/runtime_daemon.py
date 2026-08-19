@@ -317,6 +317,11 @@ class RuntimeManager:
                 f"Unable to reconcile orphaned runtime {name}: {', '.join(remaining)}"
             )
 
+    def _configure_jail_loopback(self, name: str) -> None:
+        self._run(
+            ["jexec", name, "ifconfig", "lo0", "inet", "127.0.0.1/8", "up"]
+        )
+
     def _install_jail_authorized_key(self, jail_root: str) -> None:
         public_key = Path(self.config.ssh_public_key)
         if not public_key.is_file():
@@ -451,6 +456,7 @@ class RuntimeManager:
                     "up",
                 ]
             )
+            self._configure_jail_loopback(name)
             self._run(
                 [
                     "jexec",
