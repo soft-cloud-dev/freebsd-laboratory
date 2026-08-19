@@ -7,6 +7,7 @@ from jupyter_server.extension.application import ExtensionApp
 from traitlets import Bool, Int, Unicode
 
 from .handlers import ExportHandler, EventHandler, SERVICE_SETTINGS_KEY, StateHandler
+from .kernel_telemetry import SentryKernelWebsocketConnection
 from .runtime_client import DEFAULT_RUNTIME_SOCKET, RuntimeClient, RuntimeControlError
 from .service import LabService
 from .telemetry import init_sentry
@@ -50,6 +51,11 @@ class FreeBSDLaboratoryApp(ExtensionApp):
 
     def initialize_settings(self) -> None:
         init_sentry("jupyter-server")
+        # Kernel runtimes remain network-isolated. Their IOPub error messages
+        # already pass through the host Jupyter Server, so capture errors here
+        # instead of granting the jail/VM outbound access to sentry.io.
+        self.settings["kernel_websocket_connection_class"] = SentryKernelWebsocketConnection
+
         assert self.serverapp is not None
         if self.reconcile_runtimes_on_start and platform.system() == "FreeBSD":
             try:
