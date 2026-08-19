@@ -106,6 +106,7 @@ pkg install -y \
     "${PY_TAG}-pip" \
     "${PY_TAG}-setuptools" \
     "${PY_TAG}-wheel" \
+    "${PY_TAG}-jupyter-builder" \
     "${PY_TAG}-jupyterlab" \
     "${PY_TAG}-ipykernel" \
     "${PY_TAG}-cryptography" \
