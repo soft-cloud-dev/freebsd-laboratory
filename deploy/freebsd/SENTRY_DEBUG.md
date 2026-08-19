@@ -15,11 +15,11 @@ The command checks, in order:
 1. `sentry-sdk` importability in the current Python environment.
 2. DSN structure without printing the public key, secret, or full DSN.
 3. Presence of proxy-related environment variables without printing their values.
-4. DNS resolution of the Sentry ingest hostname.
-5. TCP connectivity to the DSN endpoint.
-6. TLS certificate verification for HTTPS DSNs.
+4. DNS resolution of the Sentry ingest hostname through the same Python/libc resolver path used by the application.
+5. TCP connectivity to one of the addresses returned by that DNS lookup, without performing a second hostname lookup.
+6. TLS certificate verification for HTTPS DSNs, requiring TLS 1.2 or newer.
 
-A failed check exits with status 1. A read-only successful run reports the event check as `SKIP`.
+The DNS check performs three bounded attempts for transient `EAI_AGAIN` or `EAI_NONAME` failures. A failed check exits with status 1. A read-only successful run reports the event check as `SKIP`.
 
 ## End-to-end test event
 
