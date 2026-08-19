@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 
 BOOTSTRAP = Path("deploy/freebsd/bootstrap.sh")
+LABEXTENSION_PACKAGE = Path("labextension/package.json")
 
 
 def bootstrap_text() -> str:
@@ -48,9 +50,35 @@ def test_bootstrap_creates_venv_local_jupyter_entrypoints() -> None:
         'install_python_entrypoint "$JUPYTER_VENV/bin/jupyter-labextension" '
         'jupyterlab.labextensions main'
     ) in text
-    assert text.index('install_python_entrypoint "$JUPYTER_VENV/bin/jupyter"') < text.index(
-        'HOME="$JUPYTER_HOME" "$JUPYTER_VENV/bin/jupyter" server extension enable'
+
+
+def test_bootstrap_registers_server_extension_without_broken_enable_cli() -> None:
+    text = bootstrap_text()
+    assert "jupyter_server_config.d" in text
+    assert '"freebsd_laboratory": true' in text
+    assert 'ExtensionPackage(name="freebsd_laboratory", enabled=True)' in text
+    assert "server extension enable" not in text
+    assert (
+        "import freebsd_laboratory, jupyter_builder, jupyter_core, jupyter_server, jupyterlab"
+        in text
     )
+
+
+def test_bootstrap_registers_prebuilt_labextension() -> None:
+    text = bootstrap_text()
+    assert 'LABEXT_OUTPUT="$LAB_REPO_DIR/labextension/labextension"' in text
+    assert '[ -d "$LABEXT_OUTPUT/static" ]' in text
+    assert 'LABEXT_DEST="$JUPYTER_VENV/share/jupyter/labextensions/$LABEXT_NAME"' in text
+    assert 'ln -s "$LABEXT_OUTPUT" "$LABEXT_DEST"' in text
+    assert "labextension develop" not in text
+
+
+def test_labextension_build_produces_prebuilt_bundle() -> None:
+    package = json.loads(LABEXTENSION_PACKAGE.read_text(encoding="utf-8"))
+    assert package["scripts"]["build:labextension"] == "jupyter-builder build ."
+    assert package["jupyterlab"]["outputDir"] == "labextension"
+    assert "@jupyterlab/builder" in package["devDependencies"]
+    assert "@jupyter/builder" not in package["devDependencies"]
 
 
 def test_bootstrap_prepares_user_owned_jupyter_paths() -> None:

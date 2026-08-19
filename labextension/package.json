@@ -7,8 +7,10 @@
   "types": "lib/index.d.ts",
   "style": "style/index.css",
   "scripts": {
-    "build": "tsc",
-    "clean": "rimraf lib tsconfig.tsbuildinfo"
+    "build": "npm run build:lib && npm run build:labextension",
+    "build:lib": "tsc",
+    "build:labextension": "jupyter-builder build .",
+    "clean": "rimraf lib labextension tsconfig.tsbuildinfo"
   },
   "dependencies": {
     "@jupyterlab/application": "^4.3.0",
@@ -19,6 +21,7 @@
     "@lumino/widgets": "^2.5.0"
   },
   "devDependencies": {
+    "@jupyterlab/builder": "^4.3.0",
     "rimraf": "^6.0.0",
     "typescript": "~5.7.0"
   },
