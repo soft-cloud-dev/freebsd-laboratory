@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import platform
+import re
 import threading
 import uuid
 from dataclasses import asdict, dataclass
@@ -35,6 +37,24 @@ MACHINE_EVENT_KINDS = frozenset(
         "design-validated",
     }
 )
+SENSITIVE_KEY_RE = re.compile(
+    r"(?:^|[_-])(?:authorization|cookie|credential|password|passwd|secret|token|"
+    r"api[_-]?key|private[_-]?key)(?:$|[_-])",
+    re.IGNORECASE,
+)
+REDACTED_VALUE = "[REDACTED]"
+
+
+class EvidenceLimitError(ValueError):
+    """Base class for evidence resource-limit failures."""
+
+
+class EvidencePayloadTooLarge(EvidenceLimitError):
+    pass
+
+
+class EvidenceEventLimitReached(EvidenceLimitError):
+    pass
 
 
 def utc_now() -> str:
@@ -58,6 +78,50 @@ def sha256_file(path: Path) -> str:
     return sha256_bytes(path.read_bytes())
 
 
+def redact_payload(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {
+            str(key): (
+                REDACTED_VALUE
+                if SENSITIVE_KEY_RE.search(str(key))
+                else redact_payload(item)
+            )
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [redact_payload(item) for item in value]
+    if isinstance(value, tuple):
+        return [redact_payload(item) for item in value]
+    return value
+
+
+def minimize_persisted_payload(kind: str, payload: dict[str, Any]) -> dict[str, Any]:
+    """Remove transient cell source after deriving a reproducible identity."""
+
+    if kind != "cell-executed":
+        return payload
+
+    minimized = dict(payload)
+    cell_value = minimized.get("cell")
+    if not isinstance(cell_value, dict):
+        raise ValueError("cell-executed payload requires a cell object")
+    cell = dict(cell_value)
+    source = cell.pop("source", "")
+    if isinstance(source, list):
+        if not all(isinstance(part, str) for part in source):
+            raise ValueError("Cell source list must contain only strings")
+        source_text = "".join(source)
+    elif isinstance(source, str):
+        source_text = source
+    else:
+        raise ValueError("Cell source must be a string or string list")
+    source_bytes = source_text.encode("utf-8")
+    cell["source_sha256"] = sha256_bytes(source_bytes)
+    cell["source_bytes"] = len(source_bytes)
+    minimized["cell"] = cell
+    return minimized
+
+
 @dataclass(frozen=True)
 class EvidenceEvent:
     sequence: int
@@ -69,14 +133,31 @@ class EvidenceEvent:
 
 
 class LabService:
-    """Owns the server-side evidence stream and machine-derived lab state."""
+    """Owns a bounded, redacted, durable server-side evidence stream."""
 
-    def __init__(self, root_dir: Path, lab_path: str, evidence_dir: str) -> None:
+    def __init__(
+        self,
+        root_dir: Path,
+        lab_path: str,
+        evidence_dir: str,
+        *,
+        max_events: int = 10_000,
+        max_event_payload_bytes: int = 1024 * 1024,
+        fsync_events: bool = True,
+    ) -> None:
+        if max_events < 1:
+            raise ValueError("max_events must be positive")
+        if max_event_payload_bytes < 1024:
+            raise ValueError("max_event_payload_bytes must be at least 1024")
+
         self.root_dir = root_dir.resolve()
         self.lab_file = self._resolve_inside_root(lab_path)
         self.spec = self._load_spec(self.lab_file)
         self.session_id = uuid.uuid4().hex
         self.started_at = utc_now()
+        self.max_events = max_events
+        self.max_event_payload_bytes = max_event_payload_bytes
+        self.fsync_events = fsync_events
         self._lock = threading.RLock()
         self._events: list[EvidenceEvent] = []
 
@@ -87,6 +168,7 @@ class LabService:
         self.session_dir.mkdir(parents=True, exist_ok=False)
         self.events_file = self.session_dir / "events.jsonl"
         self.events_file.touch(mode=0o600)
+        self.events_file.chmod(0o600)
 
     def _resolve_inside_root(self, value: str) -> Path:
         path = (self.root_dir / value).resolve()
@@ -162,19 +244,38 @@ class LabService:
         if not isinstance(payload, dict):
             raise ValueError("Event payload must be a mapping")
 
+        redacted_payload = redact_payload(payload)
+        if not isinstance(redacted_payload, dict):
+            raise ValueError("Redacted event payload must be a mapping")
+        incoming_bytes = canonical_json(redacted_payload)
+        if len(incoming_bytes) > self.max_event_payload_bytes:
+            raise EvidencePayloadTooLarge(
+                f"Event payload is {len(incoming_bytes)} bytes; "
+                f"limit is {self.max_event_payload_bytes}"
+            )
+
+        safe_payload = minimize_persisted_payload(kind, redacted_payload)
+        payload_bytes = canonical_json(safe_payload)
+
         with self._lock:
+            if len(self._events) >= self.max_events:
+                raise EvidenceEventLimitReached(
+                    f"Evidence session reached its {self.max_events}-event limit"
+                )
             event = EvidenceEvent(
                 sequence=len(self._events) + 1,
                 recorded_at=utc_now(),
                 kind=kind,
                 source=source,
-                payload_sha256=sha256_bytes(canonical_json(payload)),
-                payload=payload,
+                payload_sha256=sha256_bytes(payload_bytes),
+                payload=safe_payload,
             )
+            serialized = canonical_json(asdict(event)) + b"\n"
+            with self.events_file.open("ab", buffering=0) as stream:
+                stream.write(serialized)
+                if self.fsync_events:
+                    os.fsync(stream.fileno())
             self._events.append(event)
-            with self.events_file.open("a", encoding="utf-8") as stream:
-                stream.write(json.dumps(asdict(event), sort_keys=True, ensure_ascii=False))
-                stream.write("\n")
             return event
 
     def _completed_stages(self) -> set[str]:
@@ -226,6 +327,8 @@ class LabService:
                 "evidence": {
                     "session_id": self.session_id,
                     "events": len(self._events),
+                    "max_events": self.max_events,
+                    "max_event_payload_bytes": self.max_event_payload_bytes,
                     "attestation": "self-recorded",
                     "signing_enabled": bool(signing["enabled"]),
                 },

@@ -1,5 +1,5 @@
 #!/bin/sh
-
+#
 # PROVIDE: freebsd_lab_daemon
 # REQUIRE: LOGIN
 # KEYWORD: shutdown
@@ -32,8 +32,33 @@ required_modules="if_bridge if_epair"
 start_precmd="${name}_prestart"
 start_postcmd="${name}_poststart"
 
+freebsd_lab_daemon_validate_scalar()
+{
+    _label=$1
+    _value=$2
+    case "${_value}" in
+        ""|*[!A-Za-z0-9_./:@,+-]*)
+            err 1 "Invalid ${_label}; whitespace and shell metacharacters are not allowed"
+            ;;
+    esac
+}
+
 freebsd_lab_daemon_prestart()
 {
+    freebsd_lab_daemon_validate_scalar runtime_program \
+        "${freebsd_lab_daemon_runtime_program}"
+    freebsd_lab_daemon_validate_scalar pidfile "${freebsd_lab_daemon_pidfile}"
+    freebsd_lab_daemon_validate_scalar socket "${freebsd_lab_daemon_socket}"
+    freebsd_lab_daemon_validate_scalar group "${freebsd_lab_daemon_group}"
+    freebsd_lab_daemon_validate_scalar network "${freebsd_lab_daemon_network}"
+    freebsd_lab_daemon_validate_scalar host_address \
+        "${freebsd_lab_daemon_host_address}"
+    freebsd_lab_daemon_validate_scalar address_start \
+        "${freebsd_lab_daemon_address_start}"
+    freebsd_lab_daemon_validate_scalar address_end \
+        "${freebsd_lab_daemon_address_end}"
+    freebsd_lab_daemon_validate_scalar bridge "${freebsd_lab_daemon_bridge}"
+
     if ! /usr/sbin/pw groupshow "${freebsd_lab_daemon_group}" >/dev/null 2>&1; then
         err 1 "Required group ${freebsd_lab_daemon_group} does not exist"
     fi
@@ -70,6 +95,8 @@ freebsd_lab_daemon_poststart()
     fi
 }
 
+# freebsd_lab_daemon_runtime_args is deliberately root-controlled free-form
+# argument text. All scalar values interpolated beside it are validated above.
 command_args="-f -P ${pidfile} -S -T ${name} \
 ${freebsd_lab_daemon_runtime_program} \
 --socket=${freebsd_lab_daemon_socket} \

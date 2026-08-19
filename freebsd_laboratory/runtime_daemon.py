@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import argparse
-import errno
 import grp
 import ipaddress
 import json
@@ -12,12 +11,15 @@ import shlex
 import socketserver
 import stat
 import subprocess
+import sys
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Sequence
 
 from .network import IPv4LeasePool
+from .peer_credentials import PeerCredentials, freebsd_peer_credentials
+from .process_identity import process_matches, query_process_identity
 from .runtime_client import DEFAULT_RUNTIME_SOCKET
 
 
@@ -51,8 +53,26 @@ class RuntimeConfig:
     ssh_public_key: str = "/usr/local/etc/freebsd-laboratory/id_ed25519.pub"
 
 
+@dataclass(frozen=True)
+class RuntimeOwner:
+    pid: int
+    uid: int
+    gid: int
+    started_at: str
+    process_digest: str
+
+    def registry_fields(self) -> dict[str, Any]:
+        return {
+            "owner_pid": self.pid,
+            "owner_uid": self.uid,
+            "owner_gid": self.gid,
+            "owner_started_at": self.started_at,
+            "owner_process_digest": self.process_digest,
+        }
+
+
 class RuntimeManager:
-    """Root-owned lifecycle manager with a deliberately small command surface."""
+    """Root-owned lifecycle manager with an authenticated, constrained API."""
 
     def __init__(self, config: RuntimeConfig) -> None:
         self.config = config
@@ -89,20 +109,76 @@ class RuntimeManager:
         check: bool = True,
         timeout: float | None = 60,
     ) -> subprocess.CompletedProcess[str]:
+        normalized = list(command)
         try:
             result = subprocess.run(
-                list(command),
+                normalized,
                 capture_output=True,
                 text=True,
                 check=False,
                 timeout=timeout,
             )
         except subprocess.TimeoutExpired as error:
-            raise RuntimeError(f"Command timed out: {shlex.join(command)}") from error
+            raise RuntimeError(f"Command timed out: {shlex.join(normalized)}") from error
+        except OSError as error:
+            if check:
+                raise RuntimeError(
+                    f"Unable to execute {shlex.join(normalized)}: {error}"
+                ) from error
+            return subprocess.CompletedProcess(normalized, 127, "", str(error))
         if check and result.returncode != 0:
             detail = result.stderr.strip() or result.stdout.strip() or "command failed"
-            raise RuntimeError(f"{shlex.join(command)}: {detail}")
+            raise RuntimeError(f"{shlex.join(normalized)}: {detail}")
         return result
+
+    @staticmethod
+    def _owner_from_peer(peer: PeerCredentials, requested_pid: int) -> RuntimeOwner:
+        owner_pid = RuntimeManager.validate_owner_pid(requested_pid)
+        if owner_pid != peer.pid:
+            raise PermissionError(
+                f"owner_pid {owner_pid} does not match authenticated peer pid {peer.pid}"
+            )
+        identity = query_process_identity(peer.pid)
+        if identity is None:
+            raise PermissionError("Unable to fingerprint authenticated peer process")
+        if identity.uid != peer.uid:
+            raise PermissionError(
+                f"Authenticated peer uid {peer.uid} does not own pid {peer.pid}"
+            )
+        return RuntimeOwner(
+            pid=peer.pid,
+            uid=peer.uid,
+            gid=peer.gid,
+            started_at=identity.started_at,
+            process_digest=identity.digest,
+        )
+
+    @staticmethod
+    def _owner_alive(record: dict[str, Any]) -> bool:
+        owner_pid = record.get("owner_pid")
+        owner_uid = record.get("owner_uid")
+        process_digest = record.get("owner_process_digest")
+        if (
+            isinstance(owner_pid, bool)
+            or not isinstance(owner_pid, int)
+            or owner_pid <= 1
+            or isinstance(owner_uid, bool)
+            or not isinstance(owner_uid, int)
+            or not isinstance(process_digest, str)
+            or not process_digest
+        ):
+            return False
+        return process_matches(owner_pid, owner_uid, process_digest)
+
+    @staticmethod
+    def _authorize_record(record: dict[str, Any], requester_uid: int | None) -> None:
+        if requester_uid is None:
+            raise PermissionError("Runtime operation has no authenticated requester")
+        if requester_uid == 0:
+            return
+        owner_uid = record.get("owner_uid")
+        if not isinstance(owner_uid, int) or owner_uid != requester_uid:
+            raise PermissionError("Runtime is owned by another Unix user")
 
     def _registry_path(self, name: str) -> Path:
         return self.registry_dir / f"{name}.json"
@@ -143,17 +219,15 @@ class RuntimeManager:
     def _delete_registry(self, name: str) -> None:
         self._registry_path(name).unlink(missing_ok=True)
 
-    @staticmethod
-    def _pid_alive(pid: int) -> bool:
-        try:
-            os.kill(pid, 0)
-        except OSError as error:
-            if error.errno == errno.ESRCH:
-                return False
-            if error.errno == errno.EPERM:
-                return True
-            raise
-        return True
+    def _vm_available(self) -> bool:
+        command = Path(self.config.vm_command)
+        return command.is_file() and os.access(command, os.X_OK)
+
+    def _require_vm_backend(self) -> None:
+        if not self._vm_available():
+            raise RuntimeError(
+                f"bhyve backend is unavailable: {self.config.vm_command}; install vm-bhyve"
+            )
 
     def _ensure_bridge(self) -> None:
         result = self._run(["ifconfig", self.config.bridge_name], check=False)
@@ -176,6 +250,7 @@ class RuntimeManager:
             self._run(["ifconfig", self.config.bridge_name, "up"])
 
     def _ensure_vm_switch(self) -> None:
+        self._require_vm_backend()
         result = self._run(
             [self.config.vm_command, "switch", "info", self.config.vm_switch],
             check=False,
@@ -241,9 +316,14 @@ class RuntimeManager:
         authorized_keys.chmod(0o600)
         os.chown(authorized_keys, uid, gid)
 
-    def create_jail(self, name: str, owner_pid: int) -> dict[str, Any]:
+    def create_jail(
+        self,
+        name: str,
+        owner_pid: int,
+        peer: PeerCredentials,
+    ) -> dict[str, Any]:
         name = self.validate_name(name)
-        owner_pid = self.validate_owner_pid(owner_pid)
+        owner = self._owner_from_peer(peer, owner_pid)
         if self._load_registry(name) is not None:
             raise RuntimeError(f"Runtime already registered: {name}")
 
@@ -255,7 +335,7 @@ class RuntimeManager:
             "schema": "softcloud.runtime/v1",
             "name": name,
             "type": "jail",
-            "owner_pid": owner_pid,
+            **owner.registry_fields(),
             "guest_ip": address,
             "dataset": dataset,
             "jail_root": jail_root,
@@ -351,12 +431,18 @@ class RuntimeManager:
                 "interface": self.config.jail_interface_name,
             }
         except Exception:
-            self.destroy(name)
+            self.destroy(name, force=True)
             raise
 
-    def create_bhyve(self, name: str, owner_pid: int) -> dict[str, Any]:
+    def create_bhyve(
+        self,
+        name: str,
+        owner_pid: int,
+        peer: PeerCredentials,
+    ) -> dict[str, Any]:
         name = self.validate_name(name)
-        owner_pid = self.validate_owner_pid(owner_pid)
+        owner = self._owner_from_peer(peer, owner_pid)
+        self._require_vm_backend()
         if self._load_registry(name) is not None:
             raise RuntimeError(f"Runtime already registered: {name}")
         if not Path(self.config.ssh_public_key).is_file():
@@ -372,7 +458,7 @@ class RuntimeManager:
             "schema": "softcloud.runtime/v1",
             "name": name,
             "type": "bhyve",
-            "owner_pid": owner_pid,
+            **owner.registry_fields(),
             "guest_ip": address,
             "bridge": self.config.bridge_name,
             "vm_created": False,
@@ -415,24 +501,36 @@ class RuntimeManager:
                 "interface": self.config.vm_interface,
             }
         except Exception:
-            self.destroy(name)
+            self.destroy(name, force=True)
             raise
 
     def _jail_exists(self, name: str) -> bool:
         return self._run(["jls", "-j", name, "name"], check=False).returncode == 0
 
     def _vm_exists(self, name: str) -> bool:
+        if not self._vm_available():
+            return False
         return self._run([self.config.vm_command, "info", name], check=False).returncode == 0
 
     def _dataset_exists(self, dataset: str) -> bool:
         return self._run(["zfs", "list", "-H", "-o", "name", dataset], check=False).returncode == 0
 
-    def destroy(self, name: str) -> dict[str, Any]:
+    def destroy(
+        self,
+        name: str,
+        *,
+        requester_uid: int | None = None,
+        force: bool = False,
+    ) -> dict[str, Any]:
         name = self.validate_name(name)
         record = self._load_registry(name) or {}
+        if not force:
+            self._authorize_record(record, requester_uid)
         runtime_type = record.get("type")
         removed: list[str] = []
 
+        if runtime_type == "bhyve":
+            self._require_vm_backend()
         if runtime_type == "bhyve" or self._vm_exists(name):
             self._run([self.config.vm_command, "poweroff", "-f", name], check=False, timeout=20)
             result = self._run(
@@ -489,6 +587,8 @@ class RuntimeManager:
         return names
 
     def _discover_vms(self) -> set[str]:
+        if not self._vm_available():
+            return set()
         result = self._run([self.config.vm_command, "list"], check=False)
         if result.returncode != 0:
             return set()
@@ -521,39 +621,57 @@ class RuntimeManager:
             members.add(match.group(1))
         return members
 
-    def gc(self, *, stale_only: bool = True) -> dict[str, Any]:
+    def gc(
+        self,
+        *,
+        stale_only: bool = True,
+        requester_uid: int = 0,
+    ) -> dict[str, Any]:
         registered = self._registered()
         retained: set[str] = set()
         cleaned: list[str] = []
+        errors: dict[str, str] = {}
 
         for name, record in registered.items():
-            owner_pid = record.get("owner_pid")
-            alive = isinstance(owner_pid, int) and self._pid_alive(owner_pid)
+            alive = self._owner_alive(record)
             if stale_only and alive:
                 retained.add(name)
                 continue
-            self.destroy(name)
-            cleaned.append(name)
+            if not stale_only and requester_uid != 0 and record.get("owner_uid") != requester_uid:
+                retained.add(name)
+                continue
+            try:
+                self.destroy(name, force=True)
+                cleaned.append(name)
+            except Exception as error:
+                retained.add(name)
+                errors[name] = str(error)
 
         registered_after = self._registered()
         retained.update(registered_after)
 
-        discovered = self._discover_jails() | self._discover_vms()
-        discovered.update(dataset.rsplit("/", 1)[-1] for dataset in self._discover_datasets())
-        for name in sorted(discovered - retained):
-            self.destroy(name)
-            cleaned.append(name)
+        if requester_uid == 0:
+            discovered = self._discover_jails() | self._discover_vms()
+            discovered.update(dataset.rsplit("/", 1)[-1] for dataset in self._discover_datasets())
+            for name in sorted(discovered - retained):
+                try:
+                    self.destroy(name, force=True)
+                    cleaned.append(name)
+                except Exception as error:
+                    errors[name] = str(error)
 
-        referenced_epairs = {
-            str(record.get("epair_host"))
-            for record in self._registered().values()
-            if record.get("epair_host")
-        }
-        removed_epairs: list[str] = []
-        for interface in sorted(self._bridge_epairs() - referenced_epairs):
-            result = self._run(["ifconfig", interface, "destroy"], check=False)
-            if result.returncode == 0:
-                removed_epairs.append(interface)
+            referenced_epairs = {
+                str(record.get("epair_host"))
+                for record in self._registered().values()
+                if record.get("epair_host")
+            }
+            removed_epairs: list[str] = []
+            for interface in sorted(self._bridge_epairs() - referenced_epairs):
+                result = self._run(["ifconfig", interface, "destroy"], check=False)
+                if result.returncode == 0:
+                    removed_epairs.append(interface)
+        else:
+            removed_epairs = []
 
         active_owners = set(self._registered())
         released_addresses = self.pool.clear_orphans(active_owners)
@@ -562,6 +680,7 @@ class RuntimeManager:
             "retained": sorted(active_owners),
             "removed_epairs": removed_epairs,
             "released_addresses": released_addresses,
+            "errors": errors,
             "stale_only": stale_only,
         }
 
@@ -570,40 +689,49 @@ class RuntimeRequestHandler(socketserver.StreamRequestHandler):
     manager: RuntimeManager
 
     def handle(self) -> None:
-        raw = self.rfile.readline(MAX_REQUEST_BYTES + 1)
-        if len(raw) > MAX_REQUEST_BYTES:
-            self._reply({"ok": False, "error": "request exceeded size limit"})
-            return
         try:
+            peer = freebsd_peer_credentials(self.request)
+            raw = self.rfile.readline(MAX_REQUEST_BYTES + 1)
+            if len(raw) > MAX_REQUEST_BYTES:
+                raise ValueError("request exceeded size limit")
             request = json.loads(raw.decode("utf-8"))
             if not isinstance(request, dict):
                 raise ValueError("request must be an object")
-            result = self._dispatch(request)
+            result = self._dispatch(request, peer)
             self._reply({"ok": True, "result": result})
         except Exception as error:
             self._reply({"ok": False, "error": str(error)})
 
-    def _dispatch(self, request: dict[str, Any]) -> dict[str, Any]:
+    def _dispatch(
+        self,
+        request: dict[str, Any],
+        peer: PeerCredentials,
+    ) -> dict[str, Any]:
         action = request.get("action")
         if action == "ping":
-            return {"service": "freebsd-laboratory-runtime", "version": 1}
+            return {"service": "freebsd-laboratory-runtime", "version": 2}
         if action == "create-jail":
             return self.manager.create_jail(
                 str(request.get("name", "")),
                 request.get("owner_pid"),
+                peer,
             )
         if action == "create-bhyve":
             return self.manager.create_bhyve(
                 str(request.get("name", "")),
                 request.get("owner_pid"),
+                peer,
             )
         if action == "destroy":
-            return self.manager.destroy(str(request.get("name", "")))
+            return self.manager.destroy(
+                str(request.get("name", "")),
+                requester_uid=peer.uid,
+            )
         if action == "gc":
             stale_only = request.get("stale_only", True)
             if not isinstance(stale_only, bool):
                 raise ValueError("stale_only must be boolean")
-            return self.manager.gc(stale_only=stale_only)
+            return self.manager.gc(stale_only=stale_only, requester_uid=peer.uid)
         raise ValueError("unsupported runtime action")
 
     def _reply(self, response: dict[str, Any]) -> None:
@@ -616,6 +744,7 @@ class RuntimeRequestHandler(socketserver.StreamRequestHandler):
 class ThreadingUnixServer(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
     daemon_threads = True
     allow_reuse_address = False
+    request_queue_size = 32
 
 
 def _configure_socket(path: Path, group_name: str) -> None:
@@ -692,15 +821,19 @@ def main() -> None:
         ssh_public_key=args.ssh_public_key,
     )
     manager = RuntimeManager(config)
-    if not args.no_reconcile:
-        manager.gc(stale_only=True)
-
     socket_path = Path(config.socket_path)
     _prepare_socket_path(socket_path)
 
     handler_type = type("BoundRuntimeRequestHandler", (RuntimeRequestHandler,), {"manager": manager})
     with ThreadingUnixServer(str(socket_path), handler_type) as server:
         _configure_socket(socket_path, config.socket_group)
+        if not args.no_reconcile:
+            result = manager.gc(stale_only=True, requester_uid=0)
+            for name, detail in result.get("errors", {}).items():
+                print(
+                    f"freebsd-lab-runtime-daemon: reconciliation failed for {name}: {detail}",
+                    file=sys.stderr,
+                )
         try:
             server.serve_forever(poll_interval=0.5)
         except KeyboardInterrupt:

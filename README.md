@@ -6,11 +6,11 @@ Executable FreeBSD documentation for JupyterLab. The project separates notebook 
 
 The prototype contains five executable boundaries:
 
-1. **JupyterLab extension** — adds the `Lab progression` right sidebar, records notebook execution observations, and adds `Export evidence` to notebook toolbars.
-2. **Jupyter Server extension** — owns the evidence session, validates client event types, derives trust stages, exports artifact manifests, and can request stale-runtime reconciliation.
-3. **Runtime daemon** — a small root-owned Unix-domain-socket service that is the only component allowed to create/destroy jails, ZFS clones, epairs, bridges, and vm-bhyve guests.
+1. **JupyterLab extension** — adds the `Lab progression` right sidebar, records bounded notebook execution observations, and adds `Export evidence` to notebook toolbars.
+2. **Jupyter Server extension** — owns the evidence session, validates and redacts client event types, derives trust stages, exports artifact manifests, and can request stale-runtime reconciliation.
+3. **Runtime daemon** — a small root-owned Unix-domain-socket service that is the only component allowed to create or destroy jails, ZFS clones, epairs, bridges, and vm-bhyve guests.
 4. **FreeBSD VNET jail provisioner** — requests a disposable jail from the daemon and runs ipykernel through an SSH-only private transport.
-5. **FreeBSD bhyve provisioner** — requests an ephemeral vm-bhyve guest from the same daemon and uses the same SSH-only transport.
+5. **FreeBSD bhyve provisioner** — requests an ephemeral vm-bhyve guest from the same daemon and uses the same SSH-only transport. This backend is optional on a jail-only host.
 
 The browser is not treated as a trusted attestor. Events observed by the JupyterLab extension remain `self-recorded`. Later trust stages require server-side machine events.
 
@@ -25,7 +25,6 @@ freebsd-lab-install-kernel
 cd labextension
 npm install --no-audit --no-fund
 npm run build
-jupyter labextension develop . --overwrite
 cd ..
 jupyter lab
 ```
@@ -41,7 +40,7 @@ FreeBSD (Python 3, bhyve)      -> disposable bhyve VM
 
 The sample notebook remains jail-backed by default. Use bhyve for experiments requiring a separate kernel, boot behavior, virtual hardware, kernel modules, or privileged guest networking.
 
-## Privilege separation
+## Privilege separation and caller authentication
 
 Jupyter Server does not need root privileges. Privileged operations are delegated to:
 
@@ -49,7 +48,9 @@ Jupyter Server does not need root privileges. Privileged operations are delegate
 /var/run/freebsd-laboratory/runtime.sock
 ```
 
-The socket is created with mode `0660`, owned by root and the `freebsdlab` group. The protocol intentionally accepts only:
+The socket is created with mode `0660`, owned by root and the `freebsdlab` group. Filesystem access to the socket is necessary but is not treated as sufficient authorization. For every accepted FreeBSD Unix-domain connection, the daemon obtains `LOCAL_PEERCRED` from the kernel and records the authenticated peer PID, UID, GID, process start time, and a process fingerprint.
+
+The protocol intentionally accepts only:
 
 ```text
 ping
@@ -58,6 +59,8 @@ create-bhyve
 destroy
 gc
 ```
+
+Create requests must name the exact PID reported by `LOCAL_PEERCRED`; a group member cannot forge another long-lived PID to defeat stale-owner reconciliation. A non-root caller can destroy only a runtime owned by the same authenticated UID. `gc --all` is likewise UID-scoped for a non-root caller; only root can reset every user's runtime. Stale-only reconciliation may reclaim a runtime after its recorded PID/start-time fingerprint no longer matches a live process.
 
 Runtime names must match the generated `freebsd-lab-<id>` namespace. The daemon does not expose a general-purpose command execution endpoint.
 
@@ -77,17 +80,17 @@ sysrc freebsd_lab_daemon_enable=YES
 service freebsd_lab_daemon start
 ```
 
-The Jupyter user only needs membership in `freebsdlab` and read access to the SSH private key used for kernel transport.
+The Jupyter user only needs membership in `freebsdlab` and read access to the SSH private key used for kernel transport. Installing `vm-bhyve` is required only for the bhyve executor; jail-only daemon startup and garbage collection do not depend on `/usr/local/sbin/vm`.
 
 ## Private laboratory network
 
 Both jails and bhyve guests use the same host-only network:
 
 ```text
-bridge:         labbridge0
-network:        172.31.254.0/24
-host address:   172.31.254.1
-lease pool:     172.31.254.10-172.31.254.199
+bridge:          labbridge0
+network:         172.31.254.0/24
+host address:    172.31.254.1
+lease pool:      172.31.254.10-172.31.254.199
 physical uplink: none
 ```
 
@@ -97,7 +100,7 @@ The host firewall reference in `deploy/freebsd/` narrows this further: host-to-r
 
 ## SSH-only Jupyter transport
 
-Jupyter's five TCP channels are not exposed directly on the VNET/bhyve address. For each kernel, the provisioner reserves five unique host loopback ports from a shared host-wide lease pool, rewrites the Jupyter connection document to those ports on `127.0.0.1`, copies that document into the runtime, and forwards the leased ports through SSH:
+Jupyter's five TCP channels are not exposed directly on the VNET/bhyve address. For each kernel, the shared provisioner reserves five unique host loopback ports from a host-wide lease pool, rewrites the Jupyter connection document to those ports on `127.0.0.1`, copies that document into the runtime, and forwards the leased ports through SSH:
 
 ```text
 Jupyter 127.0.0.1:<leased-shell>   -> SSH -L -> runtime 127.0.0.1:<leased-shell>
@@ -107,9 +110,11 @@ Jupyter 127.0.0.1:<leased-control> -> SSH -L -> runtime 127.0.0.1:<leased-contro
 Jupyter 127.0.0.1:<leased-hb>      -> SSH -L -> runtime 127.0.0.1:<leased-hb>
 ```
 
-The default tunnel pool is `30000-44999`. Allocation is serialized through a shared `flock`-protected lease directory and every candidate is actually bound on loopback before acceptance. Reservation sockets are held until immediately before OpenSSH starts, while lease ownership remains until kernel cleanup. This prevents concurrent FreeBSD Laboratory sessions sharing the lease directory from selecting the same forwarding ports.
+The default tunnel pool is `30000-44999`. Allocation is serialized through a shared `flock`-protected lease directory and every candidate is actually bound on loopback before acceptance. Reservation sockets are held until immediately before OpenSSH starts, while lease ownership remains until kernel cleanup. Lease filenames carry the owner PID, UID, and a hash of the process start time, so a recycled numeric PID cannot keep an abandoned lease authoritative.
 
 The attached SSH process uses connection attempts, server-alive probes, TCP keepalives, and `ExitOnForwardFailure`. If an unrelated host process wins the final reservation-to-OpenSSH bind race, kernel startup fails rather than silently using a conflicting listener. If the attached transport later dies, Jupyter observes the kernel process failure instead of retaining unreachable direct TCP channels.
+
+The jail and bhyve provisioners share one remote-runtime lifecycle implementation. Crash leftovers under `~/.cache/freebsd-laboratory/runtime/` are removed before a same-ID kernel restart, and a transient daemon failure during cleanup does not prevent local connection-file, tunnel-lease, or cache cleanup. Daemon-side stale-owner reconciliation remains the privileged-resource backstop.
 
 ### VNET jail lifecycle
 
@@ -117,6 +122,7 @@ The jail provisioner does not use `ip4=inherit`. A kernel launch is:
 
 ```text
 Jupyter requests runtime
+  -> daemon authenticates caller PID/UID from LOCAL_PEERCRED
   -> daemon reserves private address
   -> ZFS clone from declared @clean snapshot
   -> epair create
@@ -141,6 +147,8 @@ The jail template must contain `/usr/local/bin/python3`, ipykernel, sshd, and th
 
 ```text
 Jupyter requests runtime
+  -> daemon authenticates caller PID/UID from LOCAL_PEERCRED
+  -> daemon verifies that vm-bhyve is installed
   -> daemon reserves address from shared pool
   -> vm create -t freebsd-lab -i freebsd-python.raw -C -k <pubkey> -n <netconfig>
   -> vm start
@@ -165,9 +173,11 @@ vmimage.conf
 sshd-freebsd-lab.conf
 ```
 
-The common wrapper defaults to a FreeBSD `releng/*` Git source tree, builds world/kernel, then creates a versioned ZFS jail snapshot and a versioned raw bhyve image from the same build id. Both paths validate ipykernel and fail on `pkg audit -F` findings by default. A controlled Poudriere/pkg repository can be selected through `LAB_PKG_REPOS_DIR`.
+Normal host bootstrap builds a jail from the official RELEASE `base.txz`; the separate reproducible path builds from an explicit `releng/X.Y` source revision. Package selection is resolved against the target userland ABI, target-root dynamic linker hints are initialized before validation, and images fail on `pkg audit -F` findings by default.
 
-See `deploy/freebsd/images/README.md` for patch rebuild, versioned activation, provenance and rollback procedures.
+An operator can accept only named FreeBSD VuXML records through `LAB_PKG_AUDIT_ALLOWED_VULN_IDS`. The parser tolerates hostname case and output indentation but still requires a one-to-one mapping between every reported problem and an exact allowlisted ID. Audit enforcement state and accepted IDs are written into the image provenance manifest. A controlled Poudriere/pkg repository can be selected through `LAB_PKG_REPOS_DIR`.
+
+See `deploy/freebsd/images/README.md` for patch rebuild, versioned activation, provenance, and rollback procedures.
 
 ## Crash recovery and garbage collection
 
@@ -178,17 +188,31 @@ Runtime ownership is persisted under:
 /var/db/freebsd-laboratory/network-leases/
 ```
 
-Each registry record contains the runtime name, runtime type, owning Jupyter PID, private address, and runtime-specific resources such as the ZFS dataset or host epair.
+Each registry record contains the runtime name, runtime type, authenticated owner UID/GID, owner PID/start-time fingerprint, private address, and runtime-specific resources such as the ZFS dataset or host epair.
 
-`freebsd-lab-gc` asks the daemon to reconcile stale state. Reconciliation covers registered stale runtimes, prefixed active jails and vm-bhyve guests, prefixed ZFS child datasets, orphan epair members, and stale address leases.
+`freebsd-lab-gc` asks the daemon to reconcile stale state. Reconciliation covers registered stale runtimes, prefixed active jails and vm-bhyve guests, prefixed ZFS child datasets, orphan epair members, and stale address leases. Missing optional backends do not prevent reconciliation of installed runtime types.
 
-The runtime daemon runs stale-only reconciliation at startup. The Jupyter Server extension also requests stale-only reconciliation during its own startup. A deliberate full laboratory reset is available with:
+The runtime daemon creates and permission-controls its socket before startup reconciliation. Reconciliation continues across individual cleanup failures and reports them instead of preventing the service from accepting control requests. The bootstrap waits for an authenticated daemon `ping` and prints service/syslog diagnostics if readiness times out.
+
+A deliberate reset is available with:
 
 ```sh
 freebsd-lab-gc --all
 ```
 
-## Evidence integrity and authenticity
+For a non-root caller this resets only runtimes owned by that caller's UID. Root can reset all laboratory runtimes.
+
+## Evidence integrity, minimization, and authenticity
+
+The JupyterLab observer does not persist full cell output, cell metadata, or source text. A `cell-executed` event records the cell identifier, success state, source SHA-256, source byte count, execution count, and output count. This retains a reproducible identity without copying arbitrary rendered output or notebook secrets into the evidence stream.
+
+The server recursively redacts values under common credential-bearing keys before hashing or persistence. Evidence sessions have configurable event-count and canonical-payload-size limits, and accepted JSONL events are flushed with `fsync` by default. Relevant extension settings are:
+
+```text
+FreeBSDLaboratoryApp.max_evidence_events
+FreeBSDLaboratoryApp.max_event_payload_bytes
+FreeBSDLaboratoryApp.fsync_evidence_events
+```
 
 Every export includes a manifest containing the SHA-256 hash and byte size of each evidence artifact. `SHA256SUMS` is still produced for conventional tooling.
 
@@ -228,7 +252,7 @@ Without `--public-key`, verification proves only that the embedded key signed th
 
 ## Evidence API
 
-Authenticated endpoints are mounted below the Jupyter Server base URL:
+Authenticated JSON endpoints use Jupyter Server's `APIHandler` and are mounted below the configured base URL:
 
 ```text
 GET  /freebsd-lab/api/state
@@ -236,13 +260,14 @@ POST /freebsd-lab/api/events
 POST /freebsd-lab/api/export
 ```
 
-Client POSTs remain restricted to observation events (`notebook-context` and `cell-executed`). Machine trust-stage events are separate server-side operations.
+Client POSTs remain restricted to observation events (`notebook-context` and `cell-executed`). Machine trust-stage events are separate server-side operations. Oversized payloads return HTTP 413 and exhausted sessions return HTTP 429.
 
 ## Tests
 
 ```sh
+ruff check freebsd_laboratory tests
 pytest -q
 cd labextension && npm run build
 ```
 
-Linux CI validates the portable evidence/state model, Ed25519 signing and verification, runtime reconciliation logic, SSH tunnel construction and concurrent port leasing, address allocation, provisioner helpers, shell syntax, and TypeScript compilation. Actual VNET/epair, PF, ZFS, jail, bhyve and golden-image lifecycles require execution on a dedicated FreeBSD environment.
+Linux CI validates the portable evidence/state model, Ed25519 signing and verification, authenticated runtime ownership rules, PID-reuse-resistant reconciliation and port leasing, SSH tunnel construction, provisioner crash cleanup, address allocation, shell syntax, Ruff, and TypeScript compilation. Actual `LOCAL_PEERCRED`, VNET/epair, PF, ZFS, jail, bhyve and golden-image lifecycles require execution on a dedicated FreeBSD environment.

@@ -49,6 +49,13 @@ interface ExportResult {
   files: string[];
 }
 
+interface CellDocument {
+  cell_type?: string;
+  source?: string | string[];
+  execution_count?: number | null;
+  outputs?: unknown[];
+}
+
 const serverSettings = ServerConnection.makeSettings();
 
 function endpoint(path: string): string {
@@ -82,6 +89,24 @@ async function postEvent(
     body: JSON.stringify({ kind, payload })
   });
   return response.state;
+}
+
+function normalizedSource(document: CellDocument): string {
+  if (Array.isArray(document.source)) {
+    return document.source.join('');
+  }
+  return typeof document.source === 'string' ? document.source : '';
+}
+
+function cellEvidence(document: CellDocument): Record<string, unknown> {
+  return {
+    cell_type: document.cell_type ?? 'unknown',
+    source: normalizedSource(document),
+    execution_count: document.execution_count ?? null,
+    output_count: Array.isArray(document.outputs)
+      ? document.outputs.length
+      : 0
+  };
 }
 
 function element<K extends keyof HTMLElementTagNameMap>(
@@ -320,15 +345,17 @@ const plugin: JupyterFrontEndPlugin<void> = {
         return;
       }
 
-      const cell = args.cell.model.toJSON();
+      const cellDocument = args.cell.model.toJSON() as CellDocument;
       void postEvent('cell-executed', {
         notebook: panel.context.path,
         cell_id: args.cell.model.id,
         success: args.success,
-        error: args.error ? String(args.error) : null,
-        cell
+        error_present: args.error !== null && args.error !== undefined,
+        cell: cellEvidence(cellDocument)
       })
-        .then(state => progression.setState(state))
+        .then(state => {
+          progression.setState(state);
+        })
         .catch(error => {
           console.error('FreeBSD Laboratory execution evidence failed', error);
         });

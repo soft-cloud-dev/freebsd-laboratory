@@ -4,7 +4,7 @@ import platform
 from pathlib import Path
 
 from jupyter_server.extension.application import ExtensionApp
-from traitlets import Bool, Unicode
+from traitlets import Bool, Int, Unicode
 
 from .handlers import ExportHandler, EventHandler, SERVICE_SETTINGS_KEY, StateHandler
 from .runtime_client import DEFAULT_RUNTIME_SOCKET, RuntimeClient, RuntimeControlError
@@ -24,13 +24,27 @@ class FreeBSDLaboratoryApp(ExtensionApp):
         ".freebsd-lab/evidence",
         help="Directory used for server-owned evidence sessions.",
     ).tag(config=True)
+    max_evidence_events = Int(
+        10_000,
+        min=1,
+        help="Maximum number of evidence events retained in one server session.",
+    ).tag(config=True)
+    max_event_payload_bytes = Int(
+        1024 * 1024,
+        min=1024,
+        help="Maximum canonical JSON size of one redacted evidence payload.",
+    ).tag(config=True)
+    fsync_evidence_events = Bool(
+        True,
+        help="Flush every accepted JSONL evidence event to stable storage.",
+    ).tag(config=True)
     runtime_socket = Unicode(
         DEFAULT_RUNTIME_SOCKET,
         help="Unix-domain socket exposed by freebsd-lab-runtime-daemon.",
     ).tag(config=True)
     reconcile_runtimes_on_start = Bool(
         True,
-        help="Ask the runtime daemon to remove stale runtimes whose owner PID no longer exists.",
+        help="Ask the runtime daemon to remove stale runtimes.",
     ).tag(config=True)
 
     def initialize_settings(self) -> None:
@@ -45,12 +59,18 @@ class FreeBSDLaboratoryApp(ExtensionApp):
                         ", ".join(str(item) for item in cleaned),
                     )
             except RuntimeControlError as error:
-                self.log.warning("FreeBSD Laboratory runtime reconciliation skipped: %s", error)
+                self.log.warning(
+                    "FreeBSD Laboratory runtime reconciliation skipped: %s",
+                    error,
+                )
 
         service = LabService(
             root_dir=Path(self.serverapp.root_dir),
             lab_path=self.lab_path,
             evidence_dir=self.evidence_dir,
+            max_events=self.max_evidence_events,
+            max_event_payload_bytes=self.max_event_payload_bytes,
+            fsync_events=self.fsync_evidence_events,
         )
         self.settings[SERVICE_SETTINGS_KEY] = service
         self.log.info(
