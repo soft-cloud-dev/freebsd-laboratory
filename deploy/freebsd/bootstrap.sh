@@ -75,6 +75,7 @@ LAB_GROUP=${LAB_GROUP:-freebsdlab}
 LAB_DAEMON_VENV=${LAB_DAEMON_VENV:-/usr/local/libexec/freebsd-laboratory/daemon-venv}
 LAB_DAEMON_READY_TIMEOUT=${LAB_DAEMON_READY_TIMEOUT:-30}
 LAB_INSTALL_BHYVE_BACKEND=${LAB_INSTALL_BHYVE_BACKEND:-NO}
+LAB_VM_DATASET=${LAB_VM_DATASET:-}
 LAB_JAIL_IMAGE_MODE=${LAB_JAIL_IMAGE_MODE:-release}
 LAB_SRC_DIR=${LAB_SRC_DIR:-/usr/src}
 LAB_SRC_BRANCH=${LAB_SRC_BRANCH:-}
@@ -204,6 +205,26 @@ if [ -z "$LAB_ZFS_POOL" ]; then
     fi
 fi
 zpool list "$LAB_ZFS_POOL" >/dev/null 2>&1 || fail "ZFS pool does not exist: $LAB_ZFS_POOL"
+
+if is_yes "$LAB_INSTALL_BHYVE_BACKEND"; then
+    if [ -z "$LAB_VM_DATASET" ]; then
+        LAB_VM_DATASET="${LAB_ZFS_POOL}/vm"
+    fi
+
+    log "Configuring vm-bhyve datastore at $LAB_VM_DATASET"
+
+    if ! zfs list -H -o name "$LAB_VM_DATASET" >/dev/null 2>&1; then
+        zfs create -p "$LAB_VM_DATASET"
+    fi
+
+    sysrc vm_enable=YES
+    sysrc "vm_dir=zfs:${LAB_VM_DATASET}"
+    vm init
+
+    VM_DIR_CONFIG=$(sysrc -n vm_dir 2>/dev/null || true)
+    [ "$VM_DIR_CONFIG" = "zfs:${LAB_VM_DATASET}" ] || \
+        fail "vm-bhyve vm_dir is ${VM_DIR_CONFIG:-unset}; expected zfs:${LAB_VM_DATASET}"
+fi
 
 JAIL_TEMPLATE_PARENT="${LAB_ZFS_POOL}/jails/templates"
 JAIL_DATASET_PARENT="${LAB_ZFS_POOL}/jails/containers"
@@ -439,6 +460,21 @@ else
 fi
 sysctl net.link.bridge.pfil_bridge=1 >/dev/null
 sysctl net.link.bridge.pfil_member=0 >/dev/null
+
+if is_yes "$LAB_INSTALL_BHYVE_BACKEND"; then
+    log "Configuring vm-bhyve lab switch"
+
+    if ! vm switch info freebsdlab >/dev/null 2>&1; then
+        vm switch create \
+            -t manual \
+            -b "$LAB_BRIDGE_NAME" \
+            freebsdlab
+    fi
+
+    vm switch private freebsdlab on
+    vm switch info freebsdlab >/dev/null || \
+        fail "vm-bhyve switch freebsdlab is unavailable"
+fi
 
 if is_yes "$LAB_CONFIGURE_PF"; then
     log "Installing and validating the PF anchor"
