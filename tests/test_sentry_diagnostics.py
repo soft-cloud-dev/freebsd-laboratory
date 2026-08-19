@@ -108,7 +108,7 @@ def test_read_only_diagnostics_cover_dns_tcp_and_tls(monkeypatch) -> None:
 
 def test_send_test_event_initializes_debug_and_flushes(monkeypatch) -> None:
     scope = Mock()
-    scope.capture_message.return_value = "event-id-123"
+    scope.capture_event.return_value = "event-id-123"
     sdk = Mock()
     sdk.new_scope.return_value = nullcontext(scope)
     monkeypatch.setattr(telemetry, "sentry_sdk", sdk)
@@ -134,3 +134,4 @@ def test_send_test_event_initializes_debug_and_flushes(monkeypatch) -> None:
     init.assert_called_once_with("sentry-diagnostics", debug=True)
     flush.assert_called_once_with(timeout=7.0)
     scope.set_tag.assert_any_call("diagnostic", "true")
+    scope.capture_event.assert_called_once()
