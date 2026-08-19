@@ -38,15 +38,16 @@ class SSHTransport:
                 raise RuntimeError(f"Required executable is unavailable: {command}")
         if not Path(self.private_key).is_file():
             raise RuntimeError(f"Required SSH private key is unavailable: {self.private_key}")
-        config_path = Path(self.config_file)
-        if (
-            not config_path.exists()
-            or config_path.is_dir()
-            or not os.access(config_path, os.R_OK)
-        ):
-            raise RuntimeError(
-                f"SSH client configuration path is unavailable: {self.config_file}"
-            )
+        if self.config_file != os.devnull:
+            config_path = Path(self.config_file)
+            if (
+                not config_path.exists()
+                or config_path.is_dir()
+                or not os.access(config_path, os.R_OK)
+            ):
+                raise RuntimeError(
+                    f"SSH client configuration path is unavailable: {self.config_file}"
+                )
 
     @property
     def target(self) -> str:
