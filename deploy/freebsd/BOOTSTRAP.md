@@ -2,16 +2,18 @@
 
 `deploy/freebsd/bootstrap.sh` turns a new ZFS-backed FreeBSD installation into a usable FreeBSD Laboratory host without requiring the manual setup sequence documented elsewhere in this directory.
 
-The bootstrap is intentionally FreeBSD-native. It uses `pkg` binary packages for JupyterLab, PyZMQ, cryptography, ipykernel, and related runtime dependencies instead of asking pip to compile those projects from PyPI. The repository package itself is installed with `--no-deps` into two separate virtual environments. Pip build isolation remains enabled so the `[build-system]` requirement from `pyproject.toml` (`setuptools>=77`) is honored even when the FreeBSD system setuptools package is older; only the lightweight build backend is isolated, while heavy runtime dependencies continue to come from FreeBSD packages.
+The bootstrap is FreeBSD-native. It uses `pkg` binary packages for JupyterLab, PyZMQ, cryptography, ipykernel, and related runtime dependencies instead of asking pip to compile those projects from PyPI. The repository package itself is installed with `--no-deps` into two separate virtual environments. Pip build isolation remains enabled so the `[build-system]` requirement from `pyproject.toml` is honored even when the FreeBSD system setuptools package is older.
+
+The environments are separated deliberately:
 
 - a root-owned daemon environment under `/usr/local/libexec/freebsd-laboratory/`;
 - a Jupyter environment in `<repo>/.venv` owned by the configured Jupyter user after bootstrap completes.
 
-This separation prevents the privileged runtime daemon from executing Python code out of the user-writable Jupyter checkout.
+This prevents the privileged runtime daemon from executing Python code out of the user-writable Jupyter checkout.
 
-## Complete bootstrap
+## Default bootstrap: official RELEASE userland
 
-Run as root on a fresh installation:
+Run as root on a fresh FreeBSD RELEASE installation:
 
 ```sh
 fetch -o /tmp/freebsd-lab-bootstrap.sh \
@@ -20,58 +22,134 @@ chmod 0555 /tmp/freebsd-lab-bootstrap.sh
 LAB_JUPYTER_USER=freebsd /tmp/freebsd-lab-bootstrap.sh
 ```
 
-If the host does not have a `freebsd` account, either set `LAB_JUPYTER_USER` to an existing account or omit it and the script falls back to root.
+`LAB_JAIL_IMAGE_MODE=release` is the default. The bootstrap does **not** clone `/usr/src` and does **not** run `buildworld` in this mode.
 
-The default path is complete rather than fast. It:
+The jail image pipeline is:
 
-1. bootstraps `pkg` and installs Git, Python, npm, JupyterLab, ipykernel, cryptography, pytest, and PyYAML from FreeBSD packages;
-2. clones or reuses the laboratory repository;
-3. creates the `freebsdlab` operator group and SSH transport key;
-4. creates the ZFS template/container parents;
-5. installs the root runtime daemon into an isolated root-owned virtual environment;
-6. creates the Jupyter virtual environment, builds the TypeScript extension, enables the server extension, and installs both kernelspecs;
-7. derives the matching FreeBSD source branch from the installed release, for example `15.1-RELEASE -> releng/15.1`, and checks out `/usr/src`;
-8. runs `buildworld` and creates a versioned `freebsd-python-<build-id>@clean` jail template when no reusable template is present;
-9. installs the rc.d service, bridge settings, PF anchor, and tunnel-port infrastructure;
-10. starts the runtime daemon and performs a real VNET jail smoke test that requires `security.jail.jailed=1` and `vnet0` to exist.
+```text
+official FreeBSD X.Y-RELEASE base.txz
+  -> verify base.txz SHA-256 against the official release MANIFEST
+  -> extract into a versioned ZFS dataset
+  -> pkg install python3 + matching ipykernel
+  -> create the freebsd runtime account
+  -> install the restricted SSH policy
+  -> remove inherited SSH host keys
+  -> validate ipykernel and pkg audit
+  -> write provenance manifest
+  -> ZFS @clean snapshot
+```
 
-The `buildworld` phase is expected to dominate bootstrap time. On a host that already has a valid versioned jail template, the existing latest `freebsd-python-*@clean` snapshot is reused unless rebuilding is explicitly requested.
+The release is derived from the host userland, for example `15.1-RELEASE-p2 -> 15.1-RELEASE`. The official distribution path is derived automatically on amd64 and aarch64. The downloaded `MANIFEST` and `base.txz` are cached under `/var/cache/freebsd-laboratory/releases` and the archive is reused only if its SHA-256 still matches the current official MANIFEST.
 
-## Faster host-only bootstrap
+The resulting snapshot is mode-specific, for example:
 
-To prepare Jupyter, the daemon, networking, and PF without building a jail image yet:
+```text
+zroot/jails/templates/freebsd-python-release-20260819T014500Z@clean
+```
+
+The complete bootstrap then configures the rc.d daemon, VNET bridge, PF anchor, SSH transport, activates that exact snapshot, and runs a real jail smoke test requiring both `security.jail.jailed=1` and `vnet0`.
+
+## Source/reproducible bootstrap mode
+
+Use source mode when the purpose is to build the jail userland from an explicit FreeBSD `releng/X.Y` source branch rather than use the official RELEASE distribution set:
+
+```sh
+LAB_JUPYTER_USER=freebsd \
+LAB_JAIL_IMAGE_MODE=source \
+  ./deploy/freebsd/bootstrap.sh
+```
+
+The source pipeline is:
+
+```text
+git checkout releng/X.Y
+  -> make buildworld
+  -> make installworld DESTDIR=<ZFS jail root>
+  -> make distribution DESTDIR=<ZFS jail root>
+  -> pkg install python3 + matching ipykernel
+  -> SSH/runtime configuration
+  -> provenance manifest with source branch + exact Git revision
+  -> ZFS @clean snapshot
+```
+
+This mode is intentionally slower and requires a FreeBSD source checkout. `LAB_SRC_DIR` defaults to `/usr/src`. If `/usr/src` already exists as an empty mounted ZFS dataset, the bootstrap clones directly into that directory; it does not remove or unmount the dataset. An existing non-empty path must already be a Git checkout or the bootstrap fails closed.
+
+The resulting source-built snapshot is separate from the default RELEASE snapshot, for example:
+
+```text
+zroot/jails/templates/freebsd-python-source-20260819T014500Z@clean
+```
+
+The source-built userland is tied to the exact source revision recorded in the image manifest. Reproducibility of third-party runtime packages additionally depends on the configured pkg repository state; use a controlled repository through `LAB_PKG_REPOS_DIR` when package-level reproducibility is required.
+
+## Existing image reuse
+
+The bootstrap reuses the newest `@clean` snapshot for the selected image mode unless `LAB_REBUILD_JAIL_IMAGE=YES` is set. Release and source snapshots are never selected interchangeably.
+
+To force a new default RELEASE image:
+
+```sh
+LAB_JUPYTER_USER=freebsd \
+LAB_REBUILD_JAIL_IMAGE=YES \
+  ./deploy/freebsd/bootstrap.sh
+```
+
+To force a new source-built image:
+
+```sh
+LAB_JUPYTER_USER=freebsd \
+LAB_JAIL_IMAGE_MODE=source \
+LAB_REBUILD_JAIL_IMAGE=YES \
+  ./deploy/freebsd/bootstrap.sh
+```
+
+## Host-only bootstrap
+
+To prepare Jupyter, the daemon, networking, and PF without producing or activating a jail image:
 
 ```sh
 LAB_JUPYTER_USER=freebsd \
 LAB_BUILD_JAIL_IMAGE=NO \
 LAB_SMOKE_TEST=NO \
-  /tmp/freebsd-lab-bootstrap.sh
+  ./deploy/freebsd/bootstrap.sh
 ```
 
-The VNET jail kernelspec will be installed, but it cannot start until a valid jail template is activated.
+The VNET jail kernelspec is installed, but it cannot start until a valid jail template is activated.
 
 ## Important overrides
 
 Environment variables are preferred over editing the script:
 
 ```text
-LAB_JUPYTER_USER       existing account that runs JupyterLab
-LAB_REPO_DIR           repository checkout; defaults to <user-home>/freebsd-laboratory
-LAB_REPO_REF           Git branch to clone; default main
-LAB_UPDATE_REPO        YES to fast-forward an existing checkout
-LAB_ZFS_POOL           ZFS pool; auto-selects zroot or the only available pool
-LAB_SRC_DIR            FreeBSD source checkout; default /usr/src
-LAB_SRC_BRANCH         explicit releng/* branch; normally derived automatically
-LAB_BUILD_JAIL_IMAGE   YES by default
-LAB_REBUILD_JAIL_IMAGE YES to build a new versioned template even if one exists
-LAB_SMOKE_TEST         YES by default when a jail image is active
-LAB_CONFIGURE_PF       YES by default
-LAB_BRIDGE_CLONE       persistent bridge cloner; default bridge0
-LAB_BRIDGE_NAME        laboratory bridge; default labbridge0
-LAB_NETWORK            default 172.31.254.0/24
-LAB_HOST_ADDRESS       default 172.31.254.1
-LAB_ADDRESS_START      default 172.31.254.10
-LAB_ADDRESS_END        default 172.31.254.199
+LAB_JUPYTER_USER         existing account that runs JupyterLab
+LAB_REPO_DIR             repository checkout; defaults to <user-home>/freebsd-laboratory
+LAB_REPO_REF             Git branch to clone; default main
+LAB_UPDATE_REPO          YES to fast-forward an existing checkout
+LAB_ZFS_POOL             ZFS pool; auto-selects zroot or the only available pool
+LAB_JAIL_IMAGE_MODE      release (default) or source
+LAB_BUILD_JAIL_IMAGE     YES by default
+LAB_REBUILD_JAIL_IMAGE   YES to build a new mode-specific snapshot
+LAB_SMOKE_TEST           YES by default when a jail image is active
+
+Release mode:
+LAB_RELEASE              official X.Y-RELEASE; normally derived from the host
+LAB_RELEASE_BASE_URL     default https://download.freebsd.org/releases
+LAB_RELEASE_TARGET       first release-path architecture component
+LAB_RELEASE_TARGET_ARCH  second release-path architecture component
+LAB_RELEASE_CACHE_DIR    default /var/cache/freebsd-laboratory/releases
+
+Source mode:
+LAB_SRC_DIR              source checkout; default /usr/src
+LAB_SRC_BRANCH           explicit releng/* branch; normally derived automatically
+
+Networking/security:
+LAB_CONFIGURE_PF         YES by default
+LAB_BRIDGE_CLONE         persistent bridge cloner; default bridge0
+LAB_BRIDGE_NAME          laboratory bridge; default labbridge0
+LAB_NETWORK              default 172.31.254.0/24
+LAB_HOST_ADDRESS         default 172.31.254.1
+LAB_ADDRESS_START        default 172.31.254.10
+LAB_ADDRESS_END          default 172.31.254.199
 ```
 
 The script backs up an existing `/etc/pf.conf` before changing it, validates the candidate ruleset with `pfctl -nf`, places the laboratory anchor before the prior ruleset, and only then reloads PF.
