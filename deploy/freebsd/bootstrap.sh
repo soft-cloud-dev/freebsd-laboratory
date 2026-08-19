@@ -106,7 +106,6 @@ pkg install -y \
     "${PY_TAG}-pip" \
     "${PY_TAG}-setuptools" \
     "${PY_TAG}-wheel" \
-    "${PY_TAG}-jupyter-builder" \
     "${PY_TAG}-jupyterlab" \
     "${PY_TAG}-ipykernel" \
     "${PY_TAG}-cryptography" \
@@ -183,9 +182,12 @@ rm -rf "$JUPYTER_VENV"
 $PYTHON -m venv --system-site-packages "$JUPYTER_VENV"
 "$JUPYTER_VENV/bin/python" -m pip install \
     --no-deps -e "$LAB_REPO_DIR"
+"$JUPYTER_VENV/bin/python" -m pip install \
+    --no-deps --ignore-installed "jupyter_builder>=1.2,<2"
 
 "$JUPYTER_VENV/bin/python" -c \
-    'import freebsd_laboratory, jupyter_core, jupyter_server, jupyterlab'
+    'import freebsd_laboratory, jupyter_builder, jupyter_core, jupyter_server, jupyterlab'
+[ -x "$JUPYTER_VENV/bin/jupyter-builder" ] || fail "jupyter-builder entrypoint is missing"
 install_python_entrypoint "$JUPYTER_VENV/bin/jupyter" jupyter_core.command main
 install_python_entrypoint "$JUPYTER_VENV/bin/jupyter-server" jupyter_server.serverapp main
 install_python_entrypoint "$JUPYTER_VENV/bin/jupyter-lab" jupyterlab.labapp main
@@ -195,7 +197,7 @@ log "Building and registering the JupyterLab extension"
 (
     cd "$LAB_REPO_DIR/labextension"
     npm install --no-audit --no-fund
-    npm run build
+    PATH="$JUPYTER_VENV/bin:$PATH" npm run build
 )
 
 LABEXT_OUTPUT="$LAB_REPO_DIR/labextension/labextension"
