@@ -34,6 +34,27 @@ install_python_entrypoint()
     chmod 0755 "$entrypoint_path"
 }
 
+install_sentry_sdk()
+{
+    _sentry_venv=$1
+    "$_sentry_venv/bin/python" -m pip install \
+        --no-deps --ignore-installed "sentry-sdk==$LAB_SENTRY_SDK_VERSION"
+    "$_sentry_venv/bin/python" - "$_sentry_venv" "$LAB_SENTRY_SDK_VERSION" <<'PY'
+from importlib.metadata import version
+from pathlib import Path
+import sentry_sdk
+import sys
+
+venv = Path(sys.argv[1]).resolve()
+sdk_path = Path(sentry_sdk.__file__).resolve()
+if venv not in sdk_path.parents:
+    raise SystemExit(f"sentry-sdk resolved outside venv: {sdk_path}")
+actual = version("sentry-sdk")
+if actual != sys.argv[2]:
+    raise SystemExit(f"unexpected sentry-sdk version: {actual}")
+PY
+}
+
 wait_for_runtime_daemon()
 {
     attempt=0
@@ -74,6 +95,7 @@ LAB_JUPYTER_USER=${LAB_JUPYTER_USER:-}
 LAB_GROUP=${LAB_GROUP:-freebsdlab}
 LAB_DAEMON_VENV=${LAB_DAEMON_VENV:-/usr/local/libexec/freebsd-laboratory/daemon-venv}
 LAB_DAEMON_READY_TIMEOUT=${LAB_DAEMON_READY_TIMEOUT:-30}
+LAB_SENTRY_SDK_VERSION=${LAB_SENTRY_SDK_VERSION:-2.66.1}
 LAB_INSTALL_BHYVE_BACKEND=${LAB_INSTALL_BHYVE_BACKEND:-NO}
 LAB_VM_DATASET=${LAB_VM_DATASET:-}
 LAB_JAIL_IMAGE_MODE=${LAB_JAIL_IMAGE_MODE:-release}
@@ -106,6 +128,10 @@ case "$LAB_JAIL_IMAGE_MODE" in
 esac
 case "$LAB_DAEMON_READY_TIMEOUT" in
     ''|*[!0-9]*|0) fail "LAB_DAEMON_READY_TIMEOUT must be a positive integer" ;;
+esac
+case "$LAB_SENTRY_SDK_VERSION" in
+    [0-9]*.[0-9]*.[0-9]*) ;;
+    *) fail "LAB_SENTRY_SDK_VERSION must be an explicit X.Y.Z version" ;;
 esac
 
 if [ -z "$LAB_JUPYTER_USER" ]; then
@@ -164,7 +190,8 @@ pkg install -y \
     "${PY_TAG}-cryptography" \
     "${PY_TAG}-pytest" \
     "${PY_TAG}-pyyaml" \
-    "${PY_TAG}-sentry-sdk"
+    "${PY_TAG}-certifi" \
+    "${PY_TAG}-urllib3"
 
 log "Preparing repository at $LAB_REPO_DIR"
 if [ -d "$LAB_REPO_DIR/.git" ]; then
@@ -239,6 +266,7 @@ install -d -o root -g wheel -m 0755 "$(dirname "$LAB_DAEMON_VENV")"
 $PYTHON -m venv --system-site-packages "$LAB_DAEMON_VENV"
 "$LAB_DAEMON_VENV/bin/python" -m pip install \
     --no-deps "$LAB_REPO_DIR"
+install_sentry_sdk "$LAB_DAEMON_VENV"
 "$LAB_DAEMON_VENV/bin/python" -c 'import freebsd_laboratory, sentry_sdk'
 chown -R root:wheel "$LAB_DAEMON_VENV"
 chmod -R go-w "$LAB_DAEMON_VENV"
@@ -250,6 +278,7 @@ $PYTHON -m venv --system-site-packages "$JUPYTER_VENV"
     --no-deps -e "$LAB_REPO_DIR"
 "$JUPYTER_VENV/bin/python" -m pip install \
     --no-deps --ignore-installed "jupyter_builder>=1.2,<2"
+install_sentry_sdk "$JUPYTER_VENV"
 
 "$JUPYTER_VENV/bin/python" -c \
     'import freebsd_laboratory, jupyter_builder, jupyter_core, jupyter_server, jupyterlab, sentry_sdk'
