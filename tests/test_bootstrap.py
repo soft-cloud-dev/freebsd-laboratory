@@ -125,7 +125,12 @@ def test_jail_builder_resolves_packages_against_target_abi() -> None:
     assert 'TARGET_ABI=$(pkg -o "ABI_FILE=$TARGET_ABI_FILE" -r "$ROOT" config abi)' in text
     assert 'pkg_root update -f' in text
     assert 'pkg_root install -y $LAB_JAIL_PACKAGES' in text
+    assert 'chroot "$ROOT" /etc/rc.d/ldconfig onestart' in text
+    assert '[ ! -s "$ROOT/var/run/ld-elf.so.hints" ]' in text
     assert 'chroot "$ROOT" /usr/bin/ldd /usr/local/bin/python3' in text
+    assert text.index('chroot "$ROOT" /etc/rc.d/ldconfig onestart') < text.index(
+        'chroot "$ROOT" /usr/bin/ldd /usr/local/bin/python3'
+    )
     assert 'Jail Python has unresolved shared libraries for target ABI $TARGET_ABI' in text
     assert '"package_abi": "${TARGET_ABI}"' in text
     assert 'ln -s /lib/libutil' not in text
