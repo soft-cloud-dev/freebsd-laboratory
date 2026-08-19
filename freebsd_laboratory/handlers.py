@@ -3,17 +3,21 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from jupyter_server.base.handlers import JupyterHandler
+from jupyter_server.base.handlers import APIHandler
 from jupyter_server.extension.handler import ExtensionHandlerMixin
 from tornado import web
 
-from .service import LabService
+from .service import (
+    EvidenceEventLimitReached,
+    EvidencePayloadTooLarge,
+    LabService,
+)
 
 
 SERVICE_SETTINGS_KEY = "freebsd_laboratory_service"
 
 
-class LaboratoryHandler(ExtensionHandlerMixin, JupyterHandler):
+class LaboratoryHandler(ExtensionHandlerMixin, APIHandler):
     @property
     def service(self) -> LabService:
         service = self.settings.get(SERVICE_SETTINGS_KEY)
@@ -49,8 +53,12 @@ class EventHandler(LaboratoryHandler):
 
         try:
             event = self.service.record_client_event(kind, payload)
-        except ValueError as exc:
-            raise web.HTTPError(400, str(exc)) from exc
+        except EvidencePayloadTooLarge as error:
+            raise web.HTTPError(413, str(error)) from error
+        except EvidenceEventLimitReached as error:
+            raise web.HTTPError(429, str(error)) from error
+        except ValueError as error:
+            raise web.HTTPError(400, str(error)) from error
 
         self.finish_json(
             {
