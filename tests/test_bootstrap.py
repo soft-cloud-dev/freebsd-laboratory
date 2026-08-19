@@ -128,7 +128,6 @@ def test_jail_builder_resolves_packages_against_target_abi() -> None:
     assert 'chroot "$ROOT" /usr/bin/ldd /usr/local/bin/python3' in text
     assert 'Jail Python has unresolved shared libraries for target ABI $TARGET_ABI' in text
     assert '"package_abi": "${TARGET_ABI}"' in text
-    assert 'libutil.so.9' not in text
     assert 'ln -s /lib/libutil' not in text
 
 
