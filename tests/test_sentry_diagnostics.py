@@ -117,7 +117,15 @@ def test_dns_retries_transient_name_resolution_failure(monkeypatch) -> None:
     )
 
     calls = 0
-    addresses = [(socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", ("203.0.113.10", 80))]
+    addresses = [
+        (
+            socket.AF_INET,
+            socket.SOCK_STREAM,
+            socket.IPPROTO_TCP,
+            "",
+            ("203.0.113.10", 80),
+        )
+    ]
 
     def resolve(*args, **kwargs):
         nonlocal calls
@@ -147,7 +155,9 @@ def test_dns_failure_reports_bounded_retry_count(monkeypatch) -> None:
         "https://public-key@o1.ingest.sentry.io/12345",
     )
 
-    resolve = Mock(side_effect=socket.gaierror(socket.EAI_NONAME, "Name does not resolve"))
+    resolve = Mock(
+        side_effect=socket.gaierror(socket.EAI_NONAME, "Name does not resolve")
+    )
     monkeypatch.setattr(sentry_diagnostics.socket, "getaddrinfo", resolve)
     monkeypatch.setattr(sentry_diagnostics.time, "sleep", lambda delay: None)
 
