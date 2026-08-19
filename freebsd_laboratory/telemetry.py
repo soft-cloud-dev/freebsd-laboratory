@@ -25,7 +25,7 @@ _SENSITIVE_KEY_PARTS = (
 _INLINE_SECRET_RE = re.compile(
     r"(?i)(authorization|password|passwd|token|secret|api[_-]?key)([=:]\s*)([^\s,;]+)"
 )
-_SAFE_EXCEPTION_TYPE_RE = re.compile(r"[^A-Za-z0-9_.-]+")
+_SAFE_EXCEPTION_TYPE_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_.]{0,199}$")
 
 
 def _is_sensitive_key(key: object) -> bool:
@@ -120,7 +120,7 @@ def capture_kernel_error(
         return None
 
     raw_name = str(error_name or "KernelExecutionError")[:200]
-    name = _SAFE_EXCEPTION_TYPE_RE.sub("_", raw_name).strip("._-") or "KernelExecutionError"
+    name = raw_name if _SAFE_EXCEPTION_TYPE_RE.fullmatch(raw_name) else "KernelExecutionError"
     event: dict[str, Any] = {
         "level": "error",
         "exception": {
