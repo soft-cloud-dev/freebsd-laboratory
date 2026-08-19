@@ -6,7 +6,6 @@ import json
 import os
 import socket
 import ssl
-import sys
 from dataclasses import asdict, dataclass
 from urllib.parse import urlsplit
 
