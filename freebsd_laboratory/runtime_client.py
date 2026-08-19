@@ -3,7 +3,9 @@ from __future__ import annotations
 import json
 import socket
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, NoReturn
+
+from .telemetry import capture_exception, init_sentry
 
 
 DEFAULT_RUNTIME_SOCKET = "/var/run/freebsd-laboratory/runtime.sock"
@@ -19,7 +21,26 @@ class RuntimeClient:
     socket_path: str = DEFAULT_RUNTIME_SOCKET
     timeout: float = 30.0
 
+    @staticmethod
+    def _raise_control_error(
+        action: str,
+        message: str,
+        cause: BaseException | None = None,
+    ) -> NoReturn:
+        try:
+            if cause is None:
+                raise RuntimeControlError(message)
+            raise RuntimeControlError(message) from cause
+        except RuntimeControlError as error:
+            capture_exception(
+                error,
+                component="runtime-client",
+                operation=f"runtime:{action}",
+            )
+            raise
+
     def request(self, action: str, **payload: Any) -> dict[str, Any]:
+        init_sentry("runtime-client")
         request = {"action": action, **payload}
         encoded = json.dumps(request, sort_keys=True, separators=(",", ":")).encode("utf-8") + b"\n"
 
@@ -29,24 +50,33 @@ class RuntimeClient:
                 client.connect(self.socket_path)
                 client.sendall(encoded)
                 response = self._read_line(client)
+            except RuntimeControlError as error:
+                capture_exception(
+                    error,
+                    component="runtime-client",
+                    operation=f"runtime:{action}",
+                )
+                raise
             except (OSError, TimeoutError) as error:
-                raise RuntimeControlError(
-                    f"Runtime daemon unavailable at {self.socket_path}: {error}"
-                ) from error
+                self._raise_control_error(
+                    action,
+                    f"Runtime daemon unavailable at {self.socket_path}: {error}",
+                    error,
+                )
 
         try:
             document = json.loads(response.decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError) as error:
-            raise RuntimeControlError("Runtime daemon returned invalid JSON") from error
+            self._raise_control_error(action, "Runtime daemon returned invalid JSON", error)
 
         if not isinstance(document, dict):
-            raise RuntimeControlError("Runtime daemon returned a non-object response")
+            self._raise_control_error(action, "Runtime daemon returned a non-object response")
         if document.get("ok") is not True:
             detail = document.get("error") or "runtime operation failed"
-            raise RuntimeControlError(str(detail))
+            self._raise_control_error(action, str(detail))
         result = document.get("result", {})
         if not isinstance(result, dict):
-            raise RuntimeControlError("Runtime daemon returned an invalid result")
+            self._raise_control_error(action, "Runtime daemon returned an invalid result")
         return result
 
     @staticmethod
