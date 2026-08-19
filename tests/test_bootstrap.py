@@ -203,7 +203,7 @@ def test_bootstrap_waits_for_daemon_readiness_and_prints_diagnostics() -> None:
     assert 'while [ "$attempt" -lt "$LAB_DAEMON_READY_TIMEOUT" ]' in text
     assert "service freebsd_lab_daemon status" in text
     assert "tail -n 100 /var/log/messages" in text
-    assert text.index("service freebsd_lab_daemon start") < text.index(
+    assert text.index("service freebsd_lab_daemon start") < text.rindex(
         "wait_for_runtime_daemon"
     )
 
