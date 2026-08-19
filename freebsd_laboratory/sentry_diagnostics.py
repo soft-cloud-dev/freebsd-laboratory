@@ -6,10 +6,14 @@ import json
 import os
 import socket
 import ssl
+import time
 from dataclasses import asdict, dataclass
 from urllib.parse import urlsplit
 
 from . import telemetry
+
+_DNS_ATTEMPTS = 3
+_DNS_RETRY_DELAY = 0.2
 
 
 @dataclass(frozen=True)
@@ -76,6 +80,66 @@ def _proxy_detail() -> str:
     return "proxy environment variables set: " + ", ".join(names)
 
 
+def _resolve_target(target: SentryTarget) -> tuple[list[tuple], int]:
+    """Resolve through Python/libc, tolerating a short-lived resolver miss."""
+    last_error: OSError | None = None
+    retryable_errors = {
+        code
+        for code in (
+            getattr(socket, "EAI_AGAIN", None),
+            getattr(socket, "EAI_NONAME", None),
+        )
+        if code is not None
+    }
+
+    for attempt in range(1, _DNS_ATTEMPTS + 1):
+        try:
+            addresses = socket.getaddrinfo(
+                target.host,
+                target.port,
+                family=socket.AF_UNSPEC,
+                type=socket.SOCK_STREAM,
+                proto=socket.IPPROTO_TCP,
+            )
+            if addresses:
+                return addresses, attempt
+            last_error = socket.gaierror(
+                getattr(socket, "EAI_NONAME", 8),
+                "resolver returned no addresses",
+            )
+        except OSError as error:
+            last_error = error
+
+        if (
+            attempt < _DNS_ATTEMPTS
+            and getattr(last_error, "errno", None) in retryable_errors
+        ):
+            time.sleep(_DNS_RETRY_DELAY)
+            continue
+        break
+
+    assert last_error is not None
+    raise last_error
+
+
+def _connect_resolved(addresses: list[tuple], *, timeout: float) -> socket.socket:
+    """Connect to an already-resolved address without triggering a second DNS lookup."""
+    last_error: OSError | None = None
+    for family, socktype, proto, _canonname, sockaddr in addresses:
+        raw_socket = socket.socket(family, socktype, proto)
+        raw_socket.settimeout(timeout)
+        try:
+            raw_socket.connect(sockaddr)
+            return raw_socket
+        except OSError as error:
+            last_error = error
+            raw_socket.close()
+
+    if last_error is None:
+        raise OSError("resolver returned no connectable addresses")
+    raise last_error
+
+
 def run_diagnostics(
     *,
     send_test_event: bool = False,
@@ -115,26 +179,32 @@ def run_diagnostics(
     results.append(_result("proxy", "INFO", _proxy_detail()))
 
     try:
-        addresses = socket.getaddrinfo(
-            target.host,
-            target.port,
-            type=socket.SOCK_STREAM,
-        )
+        addresses, attempts = _resolve_target(target)
     except OSError as error:
-        results.append(_result("dns", "FAIL", f"resolver error: {error}"))
+        results.append(
+            _result(
+                "dns",
+                "FAIL",
+                f"resolver error after {_DNS_ATTEMPTS} attempts: {error}",
+            )
+        )
         return results
 
     unique_addresses = sorted({entry[4][0] for entry in addresses})
+    attempt_detail = "" if attempts == 1 else f" after {attempts} attempts"
     results.append(
         _result(
             "dns",
             "PASS",
-            f"resolved {target.host} to {len(unique_addresses)} address(es)",
+            (
+                f"resolved {target.host} to {len(unique_addresses)} address(es)"
+                f"{attempt_detail}"
+            ),
         )
     )
 
     try:
-        raw_socket = socket.create_connection((target.host, target.port), timeout=timeout)
+        raw_socket = _connect_resolved(addresses, timeout=timeout)
     except OSError as error:
         results.append(_result("tcp", "FAIL", f"connection error: {error}"))
         return results
@@ -146,6 +216,7 @@ def run_diagnostics(
         results.append(_result("tcp", "PASS", "TCP connection succeeded"))
         try:
             context = ssl.create_default_context()
+            context.minimum_version = ssl.TLSVersion.TLSv1_2
             with context.wrap_socket(raw_socket, server_hostname=target.host) as tls_socket:
                 tls_version = tls_socket.version() or "unknown TLS version"
         except (OSError, ssl.SSLError) as error:
