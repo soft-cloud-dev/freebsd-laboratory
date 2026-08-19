@@ -8,6 +8,17 @@ from jupyter_server.services.kernels.connection.channels import ZMQChannelsWebso
 from .telemetry import capture_kernel_error
 
 
+def _kernel_error_values(
+    header: object,
+    content: object,
+) -> tuple[object, object] | None:
+    if not isinstance(header, dict) or header.get("msg_type") != "error":
+        return None
+    if not isinstance(content, dict):
+        return None
+    return content.get("ename"), content.get("evalue")
+
+
 class SentryKernelWebsocketConnection(ZMQChannelsWebsocketConnection):
     """Capture kernel execution errors in the host-side Jupyter process."""
 
@@ -36,19 +47,17 @@ class SentryKernelWebsocketConnection(ZMQChannelsWebsocketConnection):
             return
 
         header = self.get_part("header", msg.get("header"), msg_list)
-        if not isinstance(header, dict) or header.get("msg_type") != "error":
+        content = self.get_part("content", msg.get("content"), msg_list)
+        values = _kernel_error_values(header, content)
+        if values is None:
             return
         if not self._first_observation(header.get("msg_id")):
             return
 
-        content = self.get_part("content", msg.get("content"), msg_list)
-        if not isinstance(content, dict):
-            return
-
         kernel_name = getattr(self.kernel_manager, "kernel_name", None)
         capture_kernel_error(
-            content.get("ename"),
-            content.get("evalue"),
+            values[0],
+            values[1],
             kernel_name=kernel_name if isinstance(kernel_name, str) else None,
         )
 
