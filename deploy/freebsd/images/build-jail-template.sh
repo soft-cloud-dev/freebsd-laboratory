@@ -60,6 +60,8 @@ RELEASE_URL=""
 RELEASE_MANIFEST_SHA256=""
 BASE_SHA256=""
 TARGET_ABI=""
+AUDIT_ENFORCED=true
+AUDIT_ACCEPTED_IDS=""
 
 if ! zfs list -H -o name "$DATASET_PARENT" >/dev/null 2>&1; then
     echo "ZFS template parent does not exist: $DATASET_PARENT" >&2
@@ -192,9 +194,6 @@ else
     make -C "$SRC_DIR" distribution DESTDIR="$ROOT"
 fi
 
-# pkg must resolve repositories for the userland inside the image, not for the
-# host running the builder.  This is especially important across FreeBSD major
-# upgrades where shared-library SONAMEs change (for example libutil.so.9 -> .10).
 TARGET_ABI_FILE="$ROOT/bin/sh"
 if [ ! -f "$TARGET_ABI_FILE" ]; then
     echo "Target ABI probe is missing: $TARGET_ABI_FILE" >&2
@@ -226,6 +225,7 @@ pkg_audit_root()
     cat "$AUDIT_OUTPUT"
 
     if [ "$LAB_FAIL_ON_PKG_AUDIT" != "YES" ]; then
+        AUDIT_ENFORCED=false
         echo "WARNING: pkg audit findings were not enforced because LAB_FAIL_ON_PKG_AUDIT=$LAB_FAIL_ON_PKG_AUDIT" >&2
         rm -f "$AUDIT_OUTPUT"
         return 0
@@ -236,9 +236,9 @@ pkg_audit_root()
         return "$AUDIT_STATUS"
     fi
 
-    PROBLEM_COUNT=$(sed -n 's/^\([0-9][0-9]*\) problem(s).*$/\1/p' "$AUDIT_OUTPUT" | tail -1)
-    WWW_COUNT=$(grep -c '^WWW:[[:space:]]' "$AUDIT_OUTPUT" || true)
-    VUXML_IDS=$(sed -n 's#^WWW:[[:space:]]*https://vuxml\.FreeBSD\.org/freebsd/\([0-9A-Fa-f-][0-9A-Fa-f-]*\)\.html[[:space:]]*$#\1#p' "$AUDIT_OUTPUT" | sort -u)
+    PROBLEM_COUNT=$(sed -n 's/^[[:space:]]*\([0-9][0-9]*\) problem(s).*$/\1/p' "$AUDIT_OUTPUT" | tail -1)
+    WWW_COUNT=$(grep -Ec '^[[:space:]]*WWW:[[:space:]]' "$AUDIT_OUTPUT" || true)
+    VUXML_IDS=$(sed -n 's#^[[:space:]]*WWW:[[:space:]]*https://[Vv][Uu][Xx][Mm][Ll]\.[Ff][Rr][Ee][Ee][Bb][Ss][Dd]\.org/freebsd/\([0-9A-Fa-f-][0-9A-Fa-f-]*\)\.html[[:space:]]*$#\1#p' "$AUDIT_OUTPUT" | sort -u)
     VUXML_COUNT=$(printf '%s\n' "$VUXML_IDS" | awk 'NF {count++} END {print count+0}')
 
     if [ -z "$PROBLEM_COUNT" ] || [ "$WWW_COUNT" -ne "$PROBLEM_COUNT" ] || [ "$VUXML_COUNT" -ne "$PROBLEM_COUNT" ]; then
@@ -258,7 +258,8 @@ pkg_audit_root()
         esac
     done
 
-    echo "WARNING: accepting only explicitly allowlisted FreeBSD VuXML findings: $VUXML_IDS" >&2
+    AUDIT_ACCEPTED_IDS=$(printf '%s\n' "$VUXML_IDS" | tr '\n' ' ' | sed 's/[[:space:]]*$//')
+    echo "WARNING: accepting only explicitly allowlisted FreeBSD VuXML findings: $AUDIT_ACCEPTED_IDS" >&2
     rm -f "$AUDIT_OUTPUT"
     return 0
 }
@@ -266,9 +267,6 @@ pkg_audit_root()
 TARGET_ABI=$(pkg -o "ABI_FILE=$TARGET_ABI_FILE" -r "$ROOT" config abi)
 printf 'Target jail package ABI: %s\n' "$TARGET_ABI"
 
-# Never reuse repository metadata selected for the host ABI.  A forced refresh
-# ensures ${ABI} repository templates are expanded for TARGET_ABI before any
-# runtime package is selected.
 pkg_root update -f
 pkg_root install -y $LAB_JAIL_PACKAGES
 
@@ -288,11 +286,6 @@ if ! grep -Eq '^sshd_enable=' "$ROOT/etc/rc.conf"; then
     printf 'sshd_enable="YES"\n' >> "$ROOT/etc/rc.conf"
 fi
 
-# A newly extracted/chrooted FreeBSD root has not run the boot-time ldconfig
-# rc.d step yet.  Python and gettext libraries installed by pkg live under
-# /usr/local/lib, which is normally added to the ELF hints file by that step.
-# Seed the same target-root hints before validation and keep them in the golden
-# image because laboratory jails intentionally do not run the full /etc/rc path.
 install -d -m 0755 "$ROOT/var/run"
 if [ ! -x "$ROOT/etc/rc.d/ldconfig" ]; then
     echo "Target ldconfig rc.d script is unavailable: $ROOT/etc/rc.d/ldconfig" >&2
@@ -333,6 +326,8 @@ if [ "$LAB_JAIL_IMAGE_MODE" = "release" ]; then
   "release_manifest_sha256": "${RELEASE_MANIFEST_SHA256}",
   "base_sha256": "${BASE_SHA256}",
   "package_abi": "${TARGET_ABI}",
+  "pkg_audit_enforced": ${AUDIT_ENFORCED},
+  "pkg_audit_accepted_vuln_ids": "${AUDIT_ACCEPTED_IDS}",
   "userland": "${USERLAND_VERSION}",
   "packages": "${PACKAGE_LIST}",
   "snapshot": "${SNAPSHOT}"
@@ -348,6 +343,8 @@ else
   "source_branch": "${SOURCE_BRANCH}",
   "source_revision": "${SOURCE_REVISION}",
   "package_abi": "${TARGET_ABI}",
+  "pkg_audit_enforced": ${AUDIT_ENFORCED},
+  "pkg_audit_accepted_vuln_ids": "${AUDIT_ACCEPTED_IDS}",
   "userland": "${USERLAND_VERSION}",
   "packages": "${PACKAGE_LIST}",
   "snapshot": "${SNAPSHOT}"
@@ -369,6 +366,7 @@ printf '%s\n' "Built jail golden image:"
 printf '  mode:     %s\n' "$LAB_JAIL_IMAGE_MODE"
 printf '  snapshot: %s\n' "$SNAPSHOT"
 printf '  pkg ABI:  %s\n' "$TARGET_ABI"
+printf '  audit:    enforced=%s accepted=%s\n' "$AUDIT_ENFORCED" "${AUDIT_ACCEPTED_IDS:-none}"
 if [ "$LAB_JAIL_IMAGE_MODE" = "release" ]; then
     printf '  release:  %s\n' "$LAB_RELEASE"
     printf '  base:     %s/base.txz\n' "$RELEASE_URL"
