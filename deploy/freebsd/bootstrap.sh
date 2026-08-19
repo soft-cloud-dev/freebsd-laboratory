@@ -48,8 +48,14 @@ LAB_UPDATE_REPO=${LAB_UPDATE_REPO:-NO}
 LAB_JUPYTER_USER=${LAB_JUPYTER_USER:-}
 LAB_GROUP=${LAB_GROUP:-freebsdlab}
 LAB_DAEMON_VENV=${LAB_DAEMON_VENV:-/usr/local/libexec/freebsd-laboratory/daemon-venv}
+LAB_JAIL_IMAGE_MODE=${LAB_JAIL_IMAGE_MODE:-release}
 LAB_SRC_DIR=${LAB_SRC_DIR:-/usr/src}
 LAB_SRC_BRANCH=${LAB_SRC_BRANCH:-}
+LAB_RELEASE=${LAB_RELEASE:-}
+LAB_RELEASE_BASE_URL=${LAB_RELEASE_BASE_URL:-https://download.freebsd.org/releases}
+LAB_RELEASE_TARGET=${LAB_RELEASE_TARGET:-}
+LAB_RELEASE_TARGET_ARCH=${LAB_RELEASE_TARGET_ARCH:-}
+LAB_RELEASE_CACHE_DIR=${LAB_RELEASE_CACHE_DIR:-/var/cache/freebsd-laboratory/releases}
 LAB_BUILD_JAIL_IMAGE=${LAB_BUILD_JAIL_IMAGE:-YES}
 LAB_REBUILD_JAIL_IMAGE=${LAB_REBUILD_JAIL_IMAGE:-NO}
 LAB_SMOKE_TEST=${LAB_SMOKE_TEST:-YES}
@@ -64,6 +70,11 @@ LAB_JAIL_MOUNT_ROOT=${LAB_JAIL_MOUNT_ROOT:-/usr/local/jails/containers}
 LAB_CONFIGURE_PF=${LAB_CONFIGURE_PF:-YES}
 LAB_PF_CONF=${LAB_PF_CONF:-/etc/pf.conf}
 LAB_SSH_KEY=${LAB_SSH_KEY:-/usr/local/etc/freebsd-laboratory/id_ed25519}
+
+case "$LAB_JAIL_IMAGE_MODE" in
+    release|source) ;;
+    *) fail "LAB_JAIL_IMAGE_MODE must be release or source" ;;
+esac
 
 if [ -z "$LAB_JUPYTER_USER" ]; then
     if pw usershow freebsd >/dev/null 2>&1; then
@@ -245,60 +256,90 @@ done
 HOME="$JUPYTER_HOME" "$JUPYTER_VENV/bin/freebsd-lab-install-kernel"
 
 if is_yes "$LAB_BUILD_JAIL_IMAGE"; then
-    RELEASE=$(freebsd-version -u 2>/dev/null || uname -r)
-    RELEASE_SERIES=$(printf '%s\n' "$RELEASE" | sed -E 's/^([0-9]+\.[0-9]+).*/\1/')
-    case "$RELEASE_SERIES" in
-        [0-9]*.[0-9]*) ;;
-        *) fail "Unable to derive a RELEASE series from: $RELEASE" ;;
-    esac
-    if [ -z "$LAB_SRC_BRANCH" ]; then
-        LAB_SRC_BRANCH="releng/$RELEASE_SERIES"
-    fi
-    case "$LAB_SRC_BRANCH" in
-        releng/*) ;;
-        *) fail "LAB_SRC_BRANCH must be an explicit releng/* branch for golden images" ;;
-    esac
-
-    log "Preparing FreeBSD source tree $LAB_SRC_BRANCH in $LAB_SRC_DIR"
-    if [ -d "$LAB_SRC_DIR/.git" ]; then
-        git -C "$LAB_SRC_DIR" fetch --depth 1 origin "$LAB_SRC_BRANCH"
-        git -C "$LAB_SRC_DIR" checkout -B "$LAB_SRC_BRANCH" FETCH_HEAD
-    elif [ -e "$LAB_SRC_DIR" ]; then
-        if [ -z "$(ls -A "$LAB_SRC_DIR" 2>/dev/null)" ]; then
-            rmdir "$LAB_SRC_DIR"
-            git clone --depth 1 --branch "$LAB_SRC_BRANCH" \
-                https://git.FreeBSD.org/src.git "$LAB_SRC_DIR"
-        else
-            fail "$LAB_SRC_DIR exists but is not a Git source checkout"
-        fi
-    else
-        git clone --depth 1 --branch "$LAB_SRC_BRANCH" \
-            https://git.FreeBSD.org/src.git "$LAB_SRC_DIR"
-    fi
-    [ -f "$LAB_SRC_DIR/Makefile" ] || fail "FreeBSD source Makefile is missing"
-
+    SNAPSHOT_PREFIX="${JAIL_TEMPLATE_PARENT}/freebsd-python-${LAB_JAIL_IMAGE_MODE}"
     EXISTING_SNAPSHOT=$(zfs list -H -t snapshot -o name -s creation -r "$JAIL_TEMPLATE_PARENT" 2>/dev/null \
-        | grep "/freebsd-python-.*@clean$" | tail -1 || true)
+        | awk -v prefix="${SNAPSHOT_PREFIX}-" 'index($0, prefix) == 1 && $0 ~ /@clean$/ {print}' \
+        | tail -1 || true)
 
     if [ -n "$EXISTING_SNAPSHOT" ] && ! is_yes "$LAB_REBUILD_JAIL_IMAGE"; then
         ACTIVE_SNAPSHOT=$EXISTING_SNAPSHOT
-        printf 'Using existing jail template snapshot: %s\n' "$ACTIVE_SNAPSHOT"
+        printf 'Using existing %s jail template snapshot: %s\n' "$LAB_JAIL_IMAGE_MODE" "$ACTIVE_SNAPSHOT"
     else
-        JOBS=$(sysctl -n hw.ncpu)
-        log "Building FreeBSD world with $JOBS jobs; this is the long bootstrap phase"
-        make -C "$LAB_SRC_DIR" -j"$JOBS" buildworld
+        case "$LAB_JAIL_IMAGE_MODE" in
+            release)
+                if [ -z "$LAB_RELEASE" ]; then
+                    LAB_RELEASE=$(freebsd-version -u 2>/dev/null || uname -r)
+                    LAB_RELEASE=$(printf '%s\n' "$LAB_RELEASE" | sed -E 's/-p[0-9]+$//')
+                fi
+                case "$LAB_RELEASE" in
+                    *-RELEASE) ;;
+                    *) fail "Release image mode requires LAB_RELEASE=<X.Y-RELEASE>; got $LAB_RELEASE" ;;
+                esac
 
-        log "Building versioned VNET jail golden image"
-        env \
-            SRC_DIR="$LAB_SRC_DIR" \
-            JAIL_DATASET_PREFIX="${JAIL_TEMPLATE_PARENT}/freebsd-python" \
-            JAIL_MOUNT_ROOT=/usr/local/jails/templates \
-            LAB_JAIL_PACKAGES="python3 ${PY_TAG}-ipykernel" \
-            "$LAB_REPO_DIR/deploy/freebsd/images/build-jail-template.sh"
+                log "Building VNET jail image from official FreeBSD $LAB_RELEASE base.txz"
+                env \
+                    LAB_JAIL_IMAGE_MODE=release \
+                    LAB_RELEASE="$LAB_RELEASE" \
+                    LAB_RELEASE_BASE_URL="$LAB_RELEASE_BASE_URL" \
+                    LAB_RELEASE_TARGET="$LAB_RELEASE_TARGET" \
+                    LAB_RELEASE_TARGET_ARCH="$LAB_RELEASE_TARGET_ARCH" \
+                    LAB_RELEASE_CACHE_DIR="$LAB_RELEASE_CACHE_DIR" \
+                    JAIL_DATASET_PREFIX="$SNAPSHOT_PREFIX" \
+                    JAIL_MOUNT_ROOT=/usr/local/jails/templates \
+                    LAB_JAIL_PACKAGES="python3 ${PY_TAG}-ipykernel" \
+                    "$LAB_REPO_DIR/deploy/freebsd/images/build-jail-template.sh"
+                ;;
+            source)
+                RELEASE=$(freebsd-version -u 2>/dev/null || uname -r)
+                RELEASE_SERIES=$(printf '%s\n' "$RELEASE" | sed -E 's/^([0-9]+\.[0-9]+).*/\1/')
+                case "$RELEASE_SERIES" in
+                    [0-9]*.[0-9]*) ;;
+                    *) fail "Unable to derive a RELEASE series from: $RELEASE" ;;
+                esac
+                if [ -z "$LAB_SRC_BRANCH" ]; then
+                    LAB_SRC_BRANCH="releng/$RELEASE_SERIES"
+                fi
+                case "$LAB_SRC_BRANCH" in
+                    releng/*) ;;
+                    *) fail "LAB_SRC_BRANCH must be an explicit releng/* branch for source images" ;;
+                esac
 
-        ACTIVE_SNAPSHOT=$(zfs list -H -t snapshot -o name -s creation -r "$JAIL_TEMPLATE_PARENT" \
-            | grep "/freebsd-python-.*@clean$" | tail -1 || true)
-        [ -n "$ACTIVE_SNAPSHOT" ] || fail "Golden-image builder produced no @clean snapshot"
+                log "Preparing FreeBSD source tree $LAB_SRC_BRANCH in $LAB_SRC_DIR"
+                if [ -d "$LAB_SRC_DIR/.git" ]; then
+                    git -C "$LAB_SRC_DIR" fetch --depth 1 origin "$LAB_SRC_BRANCH"
+                    git -C "$LAB_SRC_DIR" checkout -B "$LAB_SRC_BRANCH" FETCH_HEAD
+                elif [ -e "$LAB_SRC_DIR" ]; then
+                    if [ -d "$LAB_SRC_DIR" ] && [ -z "$(ls -A "$LAB_SRC_DIR" 2>/dev/null)" ]; then
+                        git clone --depth 1 --branch "$LAB_SRC_BRANCH" \
+                            https://git.FreeBSD.org/src.git "$LAB_SRC_DIR"
+                    else
+                        fail "$LAB_SRC_DIR exists but is not an empty directory or Git source checkout"
+                    fi
+                else
+                    git clone --depth 1 --branch "$LAB_SRC_BRANCH" \
+                        https://git.FreeBSD.org/src.git "$LAB_SRC_DIR"
+                fi
+                [ -f "$LAB_SRC_DIR/Makefile" ] || fail "FreeBSD source Makefile is missing"
+
+                JOBS=$(sysctl -n hw.ncpu)
+                log "Building FreeBSD world with $JOBS jobs for source image mode"
+                make -C "$LAB_SRC_DIR" -j"$JOBS" buildworld
+
+                log "Building versioned VNET jail image from source"
+                env \
+                    LAB_JAIL_IMAGE_MODE=source \
+                    SRC_DIR="$LAB_SRC_DIR" \
+                    JAIL_DATASET_PREFIX="$SNAPSHOT_PREFIX" \
+                    JAIL_MOUNT_ROOT=/usr/local/jails/templates \
+                    LAB_JAIL_PACKAGES="python3 ${PY_TAG}-ipykernel" \
+                    "$LAB_REPO_DIR/deploy/freebsd/images/build-jail-template.sh"
+                ;;
+        esac
+
+        ACTIVE_SNAPSHOT=$(zfs list -H -t snapshot -o name -s creation -r "$JAIL_TEMPLATE_PARENT" 2>/dev/null \
+            | awk -v prefix="${SNAPSHOT_PREFIX}-" 'index($0, prefix) == 1 && $0 ~ /@clean$/ {print}' \
+            | tail -1 || true)
+        [ -n "$ACTIVE_SNAPSHOT" ] || fail "Golden-image builder produced no $LAB_JAIL_IMAGE_MODE @clean snapshot"
     fi
 else
     ACTIVE_SNAPSHOT=""
@@ -448,6 +489,7 @@ printf 'Jupyter user:     %s\n' "$LAB_JUPYTER_USER"
 printf 'Jupyter venv:     %s\n' "$JUPYTER_VENV"
 printf 'Runtime daemon:   %s\n' "$LAB_DAEMON_VENV/bin/freebsd-lab-runtime-daemon"
 printf 'Runtime socket:   %s\n' /var/run/freebsd-laboratory/runtime.sock
+printf 'Jail image mode:  %s\n' "$LAB_JAIL_IMAGE_MODE"
 if [ -n "$ACTIVE_SNAPSHOT" ]; then
     printf 'Jail snapshot:    %s\n' "$ACTIVE_SNAPSHOT"
 fi
