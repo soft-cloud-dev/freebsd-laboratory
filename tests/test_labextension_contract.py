@@ -8,7 +8,7 @@ PACKAGE = Path("labextension/package.json")
 SOURCE = Path("labextension/src/index.ts")
 
 
-def test_labextension_uses_stable_forward_compatible_federation_baseline() -> None:
+def test_labextension_preserves_proven_legacy_build_contract() -> None:
     package = json.loads(PACKAGE.read_text(encoding="utf-8"))
 
     assert package["dependencies"] == {
@@ -19,8 +19,8 @@ def test_labextension_uses_stable_forward_compatible_federation_baseline() -> No
         "@jupyterlab/services": "^7.3.0",
         "@lumino/widgets": "^2.5.0",
     }
-    assert package["devDependencies"]["@jupyterlab/builder"] == "4.3.0"
-    assert package["scripts"]["build"].startswith("npm run clean &&")
+    assert package["devDependencies"]["@jupyterlab/builder"] == "^4.3.0"
+    assert package["scripts"]["build"] == "npm run build:lib && npm run build:labextension"
 
 
 def test_plugin_activation_does_not_wait_for_workspace_restoration() -> None:
