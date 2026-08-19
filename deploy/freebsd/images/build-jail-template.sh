@@ -215,12 +215,14 @@ pkg_root()
 pkg_audit_root()
 {
     AUDIT_OUTPUT=$(mktemp /tmp/freebsd-lab-pkg-audit.XXXXXX)
+    AUDIT_STATUS=0
     if pkg_root audit -F >"$AUDIT_OUTPUT" 2>&1; then
         cat "$AUDIT_OUTPUT"
         rm -f "$AUDIT_OUTPUT"
         return 0
+    else
+        AUDIT_STATUS=$?
     fi
-    AUDIT_STATUS=$?
     cat "$AUDIT_OUTPUT"
 
     if [ "$LAB_FAIL_ON_PKG_AUDIT" != "YES" ]; then
