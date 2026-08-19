@@ -94,9 +94,58 @@ def capture_exception(
         return scope.capture_exception(error)
 
 
+def capture_kernel_error(
+    error_name: object,
+    error_value: object,
+    *,
+    kernel_name: str | None = None,
+) -> str | None:
+    """Report a notebook execution error from the host Jupyter process.
+
+    Only the exception type and value are forwarded. Notebook source, rendered
+    traceback lines, kernel IDs, guest addresses, and connection metadata are
+    deliberately excluded so isolated runtimes do not need outbound network
+    access and notebook contents are not copied into telemetry.
+    """
+    component = "jupyter-kernel"
+    if not sentry_sdk.is_initialized() and not init_sentry(component):
+        return None
+
+    name = str(error_name or "KernelExecutionError")[:200]
+    value = str(error_value or "Kernel execution failed")[:2000]
+    event: dict[str, Any] = {
+        "level": "error",
+        "exception": {
+            "values": [
+                {
+                    "type": name,
+                    "value": value,
+                    "mechanism": {
+                        "type": "jupyter-kernel",
+                        "handled": True,
+                    },
+                }
+            ]
+        },
+    }
+
+    with sentry_sdk.new_scope() as scope:
+        scope.set_tag("component", component)
+        scope.set_tag("operation", "kernel:execute")
+        scope.set_tag("project", "freebsd-laboratory")
+        if kernel_name:
+            scope.set_tag("kernel_name", kernel_name[:200])
+        return scope.capture_event(event)
+
+
 def flush_sentry(timeout: float = 2.0) -> None:
     if sentry_sdk.is_initialized():
         sentry_sdk.flush(timeout=timeout)
 
 
-__all__ = ["capture_exception", "flush_sentry", "init_sentry"]
+__all__ = [
+    "capture_exception",
+    "capture_kernel_error",
+    "flush_sentry",
+    "init_sentry",
+]

@@ -62,3 +62,38 @@ def test_before_send_preserves_pii_but_filters_credentials() -> None:
     assert result["request"]["headers"]["Authorization"] == "[Filtered]"
     assert result["request"]["headers"]["User-Agent"] == "FreeBSD-Laboratory-Test"
     assert result["extra"]["message"] == "password=[Filtered] command failed"
+
+
+def test_capture_kernel_error_uses_host_scope_without_notebook_traceback(monkeypatch) -> None:
+    scope = Mock()
+    scope.capture_event.return_value = "event-id"
+    monkeypatch.setattr(telemetry.sentry_sdk, "is_initialized", lambda: True)
+    monkeypatch.setattr(
+        telemetry.sentry_sdk,
+        "new_scope",
+        lambda: nullcontext(scope),
+    )
+
+    result = telemetry.capture_kernel_error(
+        "ZeroDivisionError",
+        "division by zero",
+        kernel_name="freebsd-python-bhyve",
+    )
+
+    assert result == "event-id"
+    event = scope.capture_event.call_args.args[0]
+    exception = event["exception"]["values"][0]
+    assert event["level"] == "error"
+    assert exception["type"] == "ZeroDivisionError"
+    assert exception["value"] == "division by zero"
+    assert "traceback" not in event
+    scope.set_tag.assert_any_call("component", "jupyter-kernel")
+    scope.set_tag.assert_any_call("operation", "kernel:execute")
+    scope.set_tag.assert_any_call("kernel_name", "freebsd-python-bhyve")
+
+
+def test_capture_kernel_error_is_disabled_without_dsn(monkeypatch) -> None:
+    monkeypatch.delenv("SENTRY_DSN", raising=False)
+    monkeypatch.setattr(telemetry.sentry_sdk, "is_initialized", lambda: False)
+
+    assert telemetry.capture_kernel_error("ValueError", "bad value") is None
