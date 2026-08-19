@@ -30,7 +30,10 @@ The jail image pipeline is:
 official FreeBSD X.Y-RELEASE base.txz
   -> verify base.txz SHA-256 against the official release MANIFEST
   -> extract into a versioned ZFS dataset
+  -> derive pkg ABI from the target jail userland
+  -> refresh package catalogues for that target ABI
   -> pkg install python3 + matching ipykernel
+  -> validate Python shared-library resolution
   -> create the freebsd runtime account
   -> install the restricted SSH policy
   -> remove inherited SSH host keys
@@ -40,6 +43,8 @@ official FreeBSD X.Y-RELEASE base.txz
 ```
 
 The release is derived from the host userland, for example `15.1-RELEASE-p2 -> 15.1-RELEASE`. The official distribution path is derived automatically on amd64 and aarch64. The downloaded `MANIFEST` and `base.txz` are cached under `/var/cache/freebsd-laboratory/releases` and the archive is reused only if its SHA-256 still matches the current official MANIFEST.
+
+Package resolution is deliberately tied to the target image rather than the host builder. The builder points pkg's `ABI_FILE` at the target root's `/bin/sh`, forces a catalogue refresh, and records the resolved ABI in `image-manifest.json`. Before a snapshot can be created, `ldd` must show no unresolved dependency for `/usr/local/bin/python3`. This catches stale or cross-major packages such as a Python binary requiring `libutil.so.9` inside a FreeBSD 15 userland that provides `libutil.so.10`. The builder fails closed; it does not create compatibility symlinks between different shared-library major versions.
 
 The resulting snapshot is mode-specific, for example:
 
@@ -66,7 +71,9 @@ git checkout releng/X.Y
   -> make buildworld
   -> make installworld DESTDIR=<ZFS jail root>
   -> make distribution DESTDIR=<ZFS jail root>
+  -> resolve packages against the target userland ABI
   -> pkg install python3 + matching ipykernel
+  -> validate Python shared-library resolution
   -> SSH/runtime configuration
   -> provenance manifest with source branch + exact Git revision
   -> ZFS @clean snapshot
