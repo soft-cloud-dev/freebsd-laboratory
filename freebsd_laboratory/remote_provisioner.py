@@ -6,6 +6,7 @@ import platform
 import re
 import shlex
 import shutil
+import subprocess
 from pathlib import Path
 from typing import Any, ClassVar
 
@@ -56,9 +57,7 @@ class RemoteRuntimeProvisioner(LocalProvisioner):
 
     runtime_socket: str = Unicode(DEFAULT_RUNTIME_SOCKET).tag(config=True)
     ssh_user: str = Unicode("freebsd").tag(config=True)
-    ssh_private_key: str = Unicode(
-        "/usr/local/etc/freebsd-laboratory/id_ed25519"
-    ).tag(config=True)
+    ssh_keygen_command: str = Unicode("/usr/bin/ssh-keygen").tag(config=True)
     ssh_command: str = Unicode("/usr/bin/ssh").tag(config=True)
     scp_command: str = Unicode("/usr/bin/scp").tag(config=True)
     remote_connection_dir: str = Unicode("/tmp/freebsd-laboratory").tag(config=True)
@@ -77,6 +76,7 @@ class RemoteRuntimeProvisioner(LocalProvisioner):
     _runtime_name: str | None = None
     guest_ip: str | None = None
     known_hosts_file: Path | None = None
+    _ssh_private_key: Path | None = None
     _runtime_created = False
     _original_connection_ip: str | None = None
     _original_connection_ports: tuple[int, ...] = ()
@@ -94,7 +94,12 @@ class RemoteRuntimeProvisioner(LocalProvisioner):
             timeout=max(30.0, float(self.startup_timeout)),
         )
 
-    def _request_create(self, name: str, owner_pid: int) -> dict[str, Any]:
+    def _request_create(
+        self,
+        name: str,
+        owner_pid: int,
+        ssh_public_key: str,
+    ) -> dict[str, Any]:
         raise NotImplementedError
 
     def _runtime_path(self) -> Path:
@@ -102,13 +107,53 @@ class RemoteRuntimeProvisioner(LocalProvisioner):
             raise RuntimeError(f"{self.runtime_label} name is not initialized")
         return Path(self.runtime_dir).expanduser() / self._runtime_name
 
+    def _create_runtime_key(self, runtime_path: Path) -> str:
+        private_key = runtime_path / "id_ed25519"
+        public_key = runtime_path / "id_ed25519.pub"
+        result = subprocess.run(
+            [
+                self.ssh_keygen_command,
+                "-q",
+                "-t",
+                "ed25519",
+                "-N",
+                "",
+                "-f",
+                str(private_key),
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=15,
+        )
+        if result.returncode != 0:
+            detail = result.stderr.strip() or result.stdout.strip() or "ssh-keygen failed"
+            raise RuntimeError(
+                f"Unable to generate per-runtime SSH key: {detail}"
+            )
+        if private_key.is_symlink() or not private_key.is_file():
+            raise RuntimeError("ssh-keygen did not create a regular private key")
+        if public_key.is_symlink() or not public_key.is_file():
+            raise RuntimeError("ssh-keygen did not create a regular public key")
+        private_key.chmod(0o600)
+        public_key.chmod(0o600)
+        material = public_key.read_text(encoding="utf-8").strip()
+        if "\n" in material or not material.startswith("ssh-ed25519 "):
+            raise RuntimeError("ssh-keygen returned an invalid Ed25519 public key")
+        self._ssh_private_key = private_key
+        return material
+
     def _transport(self) -> SSHTransport:
-        if self.guest_ip is None or self.known_hosts_file is None:
+        if (
+            self.guest_ip is None
+            or self.known_hosts_file is None
+            or self._ssh_private_key is None
+        ):
             raise RuntimeError(f"{self.runtime_label} SSH transport is not initialized")
         return SSHTransport(
             host=self.guest_ip,
             user=self.ssh_user,
-            private_key=str(Path(self.ssh_private_key).expanduser()),
+            private_key=str(self._ssh_private_key),
             known_hosts_file=self.known_hosts_file,
             ssh_command=self.ssh_command,
             scp_command=self.scp_command,
@@ -147,11 +192,13 @@ class RemoteRuntimeProvisioner(LocalProvisioner):
         self.known_hosts_file = runtime_path / "known_hosts"
         self.known_hosts_file.touch(mode=0o600)
         self.known_hosts_file.chmod(0o600)
+        ssh_public_key = self._create_runtime_key(runtime_path)
 
         result = await asyncio.to_thread(
             self._request_create,
             self._runtime_name,
             os.getpid(),
+            ssh_public_key,
         )
         self._runtime_created = True
         guest_ip = result.get("guest_ip")
@@ -185,6 +232,7 @@ class RemoteRuntimeProvisioner(LocalProvisioner):
             self._runtime_name = None
             self.guest_ip = None
             self.known_hosts_file = None
+            self._ssh_private_key = None
 
     async def pre_launch(self, **kwargs: Any) -> dict[str, Any]:
         self._assert_supported_host()
@@ -310,6 +358,13 @@ class RemoteRuntimeProvisioner(LocalProvisioner):
         self.known_hosts_file = (
             Path(known_hosts_file) if isinstance(known_hosts_file, str) and known_hosts_file else None
         )
+        if self._runtime_name is not None:
+            candidate = Path(self.runtime_dir).expanduser() / self._runtime_name / "id_ed25519"
+            self._ssh_private_key = (
+                candidate if candidate.is_file() and not candidate.is_symlink() else None
+            )
+        else:
+            self._ssh_private_key = None
         self._runtime_created = bool(provisioner_info.get("runtime_created"))
         original_ip = provisioner_info.get("original_connection_ip")
         self._original_connection_ip = str(original_ip) if isinstance(original_ip, str) and original_ip else None
