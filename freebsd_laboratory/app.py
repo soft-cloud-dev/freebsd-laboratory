@@ -9,6 +9,7 @@ from traitlets import Bool, Int, Unicode
 from .handlers import ExportHandler, EventHandler, SERVICE_SETTINGS_KEY, StateHandler
 from .runtime_client import DEFAULT_RUNTIME_SOCKET, RuntimeClient, RuntimeControlError
 from .service import LabService
+from .telemetry import init_sentry
 
 
 class FreeBSDLaboratoryApp(ExtensionApp):
@@ -48,6 +49,7 @@ class FreeBSDLaboratoryApp(ExtensionApp):
     ).tag(config=True)
 
     def initialize_settings(self) -> None:
+        init_sentry("jupyter-server")
         assert self.serverapp is not None
         if self.reconcile_runtimes_on_start and platform.system() == "FreeBSD":
             try:
