@@ -17,6 +17,7 @@ dependencies = [
   "jupyter-server>=2.15,<3",
   "jupyterlab>=4.3,<5",
   "PyYAML>=6,<7",
+  "sentry-sdk>=2,<3",
   "traitlets>=5.14,<6"
 ]
 
@@ -32,7 +33,7 @@ dev = [
 
 [project.scripts]
 freebsd-lab-install-kernel = "freebsd_laboratory.install:main"
-freebsd-lab-runtime-daemon = "freebsd_laboratory.runtime_daemon:main"
+freebsd-lab-runtime-daemon = "freebsd_laboratory.runtime_entrypoint:main"
 freebsd-lab-gc = "freebsd_laboratory.gc:main"
 freebsd-lab-verify-evidence = "freebsd_laboratory.verify:main"
 
