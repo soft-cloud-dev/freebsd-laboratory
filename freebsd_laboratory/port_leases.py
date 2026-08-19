@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import ipaddress
 import os
 import socket
 import stat
@@ -65,10 +66,19 @@ class LocalPortLeasePool:
         directory: Path | str,
         bind_address: str = "127.0.0.1",
     ) -> None:
-        if isinstance(start, bool) or isinstance(end, bool):
+        if (
+            isinstance(start, bool)
+            or not isinstance(start, int)
+            or isinstance(end, bool)
+            or not isinstance(end, int)
+        ):
             raise ValueError("Tunnel port range must contain integer TCP ports")
         if not 1024 <= start <= 65535 or not 1024 <= end <= 65535 or start > end:
             raise ValueError("Invalid tunnel port range")
+        try:
+            ipaddress.ip_address(bind_address)
+        except ValueError as error:
+            raise ValueError(f"Invalid bind_address: {bind_address}") from error
         self.start = start
         self.end = end
         self.directory = Path(directory)
@@ -149,6 +159,8 @@ class LocalPortLeasePool:
 
     @staticmethod
     def _lease_identity(path: Path, port: int) -> tuple[int, int, str] | None:
+        if path.is_symlink():
+            return None
         parts = path.name.split(".")
         if len(parts) != 6 or parts[0] != str(port) or parts[5] != "lease":
             return None
@@ -197,11 +209,16 @@ class LocalPortLeasePool:
             yield self.start + ((offset + index) % self.capacity)
 
     def allocate(self, owner: str, pid: int, count: int) -> LocalPortReservation:
-        if not owner:
+        if not isinstance(owner, str) or not owner:
             raise ValueError("Tunnel port lease owner is required")
-        if pid != os.getpid():
+        if isinstance(pid, bool) or not isinstance(pid, int) or pid != os.getpid():
             raise ValueError("Tunnel port lease PID must match the calling process")
-        if count <= 0 or count > self.capacity:
+        if (
+            isinstance(count, bool)
+            or not isinstance(count, int)
+            or count <= 0
+            or count > self.capacity
+        ):
             raise ValueError("Invalid tunnel port lease count")
 
         identity = query_process_identity(pid)
@@ -280,8 +297,24 @@ class LocalPortLeasePool:
         uid: int,
         process_digest: str,
     ) -> None:
-        if not ports or not owner or pid <= 1 or uid < 0 or not process_digest:
+        if (
+            not isinstance(ports, (list, tuple, set))
+            or not ports
+            or not isinstance(owner, str)
+            or not owner
+            or isinstance(pid, bool)
+            or not isinstance(pid, int)
+            or pid <= 1
+            or isinstance(uid, bool)
+            or not isinstance(uid, int)
+            or uid < 0
+            or not isinstance(process_digest, str)
+            or not process_digest
+        ):
             return
+        for port in ports:
+            if isinstance(port, bool) or not isinstance(port, int) or not 1024 <= port <= 65535:
+                return
         with self._locked():
             for port in ports:
                 self._lease_path(

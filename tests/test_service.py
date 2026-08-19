@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from pathlib import Path
+import subprocess
+import sys
 from typing import Any
 
 import pytest
@@ -122,6 +125,27 @@ def test_sensitive_payload_keys_are_redacted_before_hash_and_persistence(
     persisted = service.events_file.read_text(encoding="utf-8")
     assert "Bearer secret" not in persisted
     assert '"api_token":"[REDACTED]"' in persisted
+
+
+def test_set_payload_redaction_uses_a_type_aware_deterministic_order() -> None:
+    script = "\n".join(
+        [
+            "from freebsd_laboratory.service import canonical_json, redact_payload",
+            "print(canonical_json(redact_payload({1, '1'})).decode())",
+        ]
+    )
+    outputs = [
+        subprocess.run(
+            [sys.executable, "-c", script],
+            check=True,
+            capture_output=True,
+            env={**os.environ, "PYTHONHASHSEED": seed},
+            text=True,
+        ).stdout
+        for seed in ("0", "1")
+    ]
+
+    assert outputs == ['[1,"1"]\n', '[1,"1"]\n']
 
 
 def test_event_payload_size_is_bounded_before_source_is_discarded(tmp_path: Path) -> None:

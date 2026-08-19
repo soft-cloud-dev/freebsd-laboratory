@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import ipaddress
 import json
+import os
 from pathlib import Path
 from typing import Any, Sequence
 
@@ -38,6 +40,8 @@ def remote_kernel_command(
 
 
 def connection_ports(document: dict[str, Any]) -> tuple[int, ...]:
+    if not isinstance(document, dict):
+        raise ValueError("Connection document must be a dictionary")
     ports: list[int] = []
     for field_name in CONNECTION_PORT_FIELDS:
         value = document.get(field_name)
@@ -50,7 +54,12 @@ def connection_ports(document: dict[str, Any]) -> tuple[int, ...]:
 
 
 def _validate_port_sequence(ports: Sequence[int]) -> tuple[int, ...]:
-    normalized = tuple(ports)
+    if isinstance(ports, (str, bytes)):
+        raise ValueError(f"Expected {len(CONNECTION_PORT_FIELDS)} Jupyter connection ports")
+    try:
+        normalized = tuple(ports)
+    except TypeError:
+        raise ValueError(f"Expected {len(CONNECTION_PORT_FIELDS)} Jupyter connection ports")
     if len(normalized) != len(CONNECTION_PORT_FIELDS):
         raise ValueError(
             f"Expected {len(CONNECTION_PORT_FIELDS)} Jupyter connection ports"
@@ -66,12 +75,25 @@ def rewrite_connection_file(
 ) -> tuple[Path, str, tuple[int, ...], tuple[int, ...]]:
     """Bind the Jupyter connection document to leased loopback tunnel ports."""
 
+    try:
+        ipaddress.ip_address(bind_ip)
+    except ValueError as error:
+        raise ValueError(f"Invalid bind_ip: {bind_ip}") from error
+
     connection_file = getattr(parent, "connection_file", None)
     if not connection_file:
         raise RuntimeError("Kernel manager connection file is unavailable")
-    host_path = Path(connection_file).resolve()
-    document = json.loads(host_path.read_text(encoding="utf-8"))
-    if document.get("transport", "tcp") != "tcp":
+    raw_path = Path(connection_file)
+    if raw_path.is_symlink():
+        raise RuntimeError(f"Connection file must not be a symbolic link: {raw_path}")
+    host_path = raw_path.resolve()
+    if not host_path.is_file():
+        raise RuntimeError(f"Connection file is unavailable: {host_path}")
+    try:
+        document = json.loads(host_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise ValueError(f"Invalid connection file JSON: {error}") from error
+    if not isinstance(document, dict) or document.get("transport", "tcp") != "tcp":
         raise ValueError("SSH kernel transport requires Jupyter TCP connections")
 
     original_ports = connection_ports(document)
@@ -85,8 +107,10 @@ def rewrite_connection_file(
         setattr(parent, field_name, port)
 
     temporary = host_path.with_name(f".{host_path.name}.remote.tmp")
+    if temporary.is_symlink():
+        temporary.unlink()
     temporary.write_text(json.dumps(document, indent=2) + "\n", encoding="utf-8")
-    temporary.chmod(0o600)
+    os.chmod(temporary, 0o600, follow_symlinks=False)
     temporary.replace(host_path)
     return host_path, original_ip, original_ports, tunnel_ports
 
@@ -98,7 +122,10 @@ def restore_connection_file(
 ) -> None:
     normalized_ports: tuple[int, ...] = ()
     if original_ports:
-        normalized_ports = _validate_port_sequence(original_ports)
+        try:
+            normalized_ports = _validate_port_sequence(original_ports)
+        except ValueError:
+            normalized_ports = ()
 
     if original_ip is not None:
         setattr(parent, "ip", original_ip)
@@ -109,11 +136,16 @@ def restore_connection_file(
     connection_file = getattr(parent, "connection_file", None)
     if not connection_file:
         return
-    path = Path(connection_file)
+    raw_path = Path(connection_file)
+    if raw_path.is_symlink():
+        return
+    path = raw_path.resolve()
     if not path.is_file():
         return
     try:
         document = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(document, dict):
+            return
         if original_ip is not None:
             document["ip"] = original_ip
         if normalized_ports:
@@ -123,8 +155,12 @@ def restore_connection_file(
                 strict=True,
             ):
                 document[field_name] = port
-        path.write_text(json.dumps(document, indent=2) + "\n", encoding="utf-8")
-        path.chmod(0o600)
+        temporary = path.with_name(f".{path.name}.restore.tmp")
+        if temporary.is_symlink():
+            temporary.unlink()
+        temporary.write_text(json.dumps(document, indent=2) + "\n", encoding="utf-8")
+        os.chmod(temporary, 0o600, follow_symlinks=False)
+        temporary.replace(path)
     except (OSError, ValueError, TypeError):
         return
 

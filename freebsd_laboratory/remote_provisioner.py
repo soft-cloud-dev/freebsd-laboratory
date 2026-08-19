@@ -17,6 +17,7 @@ from .remote_kernel import (
     LocalPortLeasePool,
     LocalPortReservation,
     SSHTransport,
+    connection_ports,
     release_jupyter_cached_ports,
     remote_kernel_command,
     restore_connection_file,
@@ -26,10 +27,24 @@ from .runtime_client import DEFAULT_RUNTIME_SOCKET, RuntimeClient, RuntimeContro
 
 
 def runtime_name(kernel_id: str) -> str:
+    if not isinstance(kernel_id, str):
+        raise ValueError("kernel_id must be a string")
     compact = re.sub(r"[^a-zA-Z0-9]", "", kernel_id).lower()
     if not compact:
         raise ValueError("kernel_id does not contain a usable identifier")
     return f"freebsd-lab-{compact[:16]}"
+
+
+def persisted_connection_ports(value: object) -> tuple[int, ...]:
+    """Accept only a complete, valid persisted Jupyter port tuple."""
+
+    if not isinstance(value, (list, tuple)):
+        return ()
+    try:
+        document = dict(zip(CONNECTION_PORT_FIELDS, value, strict=True))
+        return connection_ports(document)
+    except ValueError:
+        return ()
 
 
 class RemoteRuntimeProvisioner(LocalProvisioner):
@@ -118,9 +133,9 @@ class RemoteRuntimeProvisioner(LocalProvisioner):
 
     @staticmethod
     def _remove_runtime_path(path: Path) -> None:
-        if path.is_symlink():
+        if path.is_symlink() or path.is_file():
             path.unlink(missing_ok=True)
-        else:
+        elif path.is_dir():
             shutil.rmtree(path, ignore_errors=True)
 
     async def _create_runtime(self) -> None:
@@ -285,13 +300,22 @@ class RemoteRuntimeProvisioner(LocalProvisioner):
 
     async def load_provisioner_info(self, provisioner_info: dict[str, Any]) -> None:
         await super().load_provisioner_info(provisioner_info)
-        self._runtime_name = provisioner_info.get(self.provisioner_name_key)
-        self.guest_ip = provisioner_info.get("guest_ip")
+        if not isinstance(provisioner_info, dict):
+            return
+        name = provisioner_info.get(self.provisioner_name_key)
+        self._runtime_name = str(name) if isinstance(name, str) and name else None
+        guest_ip = provisioner_info.get("guest_ip")
+        self.guest_ip = str(guest_ip) if isinstance(guest_ip, str) and guest_ip else None
         known_hosts_file = provisioner_info.get("known_hosts_file")
-        self.known_hosts_file = Path(known_hosts_file) if known_hosts_file else None
+        self.known_hosts_file = (
+            Path(known_hosts_file) if isinstance(known_hosts_file, str) and known_hosts_file else None
+        )
         self._runtime_created = bool(provisioner_info.get("runtime_created"))
-        self._original_connection_ip = provisioner_info.get("original_connection_ip")
-        original_ports = provisioner_info.get("original_connection_ports", [])
-        self._original_connection_ports = tuple(int(value) for value in original_ports)
-        tunnel_ports = provisioner_info.get("tunnel_ports", [])
-        self._tunnel_ports = tuple(int(value) for value in tunnel_ports)
+        original_ip = provisioner_info.get("original_connection_ip")
+        self._original_connection_ip = str(original_ip) if isinstance(original_ip, str) and original_ip else None
+        self._original_connection_ports = persisted_connection_ports(
+            provisioner_info.get("original_connection_ports", [])
+        )
+        self._tunnel_ports = persisted_connection_ports(
+            provisioner_info.get("tunnel_ports", [])
+        )

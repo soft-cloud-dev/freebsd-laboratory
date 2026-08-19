@@ -172,12 +172,21 @@ class RuntimeManager:
 
     @staticmethod
     def _authorize_record(record: dict[str, Any], requester_uid: int | None) -> None:
-        if requester_uid is None:
+        if (
+            requester_uid is None
+            or isinstance(requester_uid, bool)
+            or not isinstance(requester_uid, int)
+            or requester_uid < 0
+        ):
             raise PermissionError("Runtime operation has no authenticated requester")
         if requester_uid == 0:
             return
         owner_uid = record.get("owner_uid")
-        if not isinstance(owner_uid, int) or owner_uid != requester_uid:
+        if (
+            isinstance(owner_uid, bool)
+            or not isinstance(owner_uid, int)
+            or owner_uid != requester_uid
+        ):
             raise PermissionError("Runtime is owned by another Unix user")
 
     @staticmethod
@@ -194,7 +203,7 @@ class RuntimeManager:
 
     def _load_registry(self, name: str) -> dict[str, Any] | None:
         path = self._registry_path(name)
-        if not path.is_file():
+        if path.is_symlink() or not path.is_file():
             return None
         try:
             document = json.loads(path.read_text(encoding="utf-8"))
@@ -220,7 +229,7 @@ class RuntimeManager:
                 stream.write("\n")
                 stream.flush()
                 os.fsync(stream.fileno())
-            temporary.chmod(0o600)
+            os.chmod(temporary, 0o600, follow_symlinks=False)
             temporary.replace(target)
         finally:
             temporary.unlink(missing_ok=True)
@@ -324,7 +333,7 @@ class RuntimeManager:
 
     def _install_jail_authorized_key(self, jail_root: str) -> None:
         public_key = Path(self.config.ssh_public_key)
-        if not public_key.is_file():
+        if public_key.is_symlink() or not public_key.is_file():
             raise RuntimeError(f"Runtime SSH public key is unavailable: {public_key}")
         user = self._run(
             [
@@ -348,16 +357,20 @@ class RuntimeManager:
 
         home_path = (Path(jail_root) / home.lstrip("/")).resolve()
         jail_root_path = Path(jail_root).resolve()
-        if jail_root_path not in home_path.parents:
+        if jail_root_path not in home_path.parents and home_path != jail_root_path:
             raise RuntimeError("Jail SSH home escapes the jail root")
         ssh_dir = home_path / ".ssh"
+        if ssh_dir.is_symlink():
+            ssh_dir.unlink()
         ssh_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
-        ssh_dir.chmod(0o700)
-        os.chown(ssh_dir, uid, gid)
+        os.chmod(ssh_dir, 0o700, follow_symlinks=False)
+        os.chown(ssh_dir, uid, gid, follow_symlinks=False)
         authorized_keys = ssh_dir / "authorized_keys"
+        if authorized_keys.is_symlink():
+            authorized_keys.unlink()
         authorized_keys.write_bytes(public_key.read_bytes())
-        authorized_keys.chmod(0o600)
-        os.chown(authorized_keys, uid, gid)
+        os.chmod(authorized_keys, 0o600, follow_symlinks=False)
+        os.chown(authorized_keys, uid, gid, follow_symlinks=False)
 
     def create_jail(
         self,
@@ -488,7 +501,8 @@ class RuntimeManager:
         owner = self._owner_from_peer(peer, owner_pid)
         self._require_vm_backend()
         self._reconcile_registered_before_create(name, owner)
-        if not Path(self.config.ssh_public_key).is_file():
+        public_key = Path(self.config.ssh_public_key)
+        if public_key.is_symlink() or not public_key.is_file():
             raise RuntimeError(f"Runtime SSH public key is unavailable: {self.config.ssh_public_key}")
 
         self._ensure_bridge()
@@ -591,14 +605,12 @@ class RuntimeManager:
                 removed.append("jail")
 
         epair_host = record.get("epair_host")
-        if isinstance(epair_host, str) and epair_host:
+        if isinstance(epair_host, str) and re.fullmatch(r"epair\d+a", epair_host):
             result = self._run(["ifconfig", epair_host, "destroy"], check=False)
             if result.returncode == 0:
                 removed.append(epair_host)
 
-        dataset = record.get("dataset")
-        if not isinstance(dataset, str) or not dataset:
-            dataset = self._jail_dataset(name)
+        dataset = self._jail_dataset(name)
         if self._dataset_exists(dataset):
             result = self._run(
                 ["zfs", "destroy", "-r", "-f", dataset], check=False, timeout=60
@@ -611,7 +623,11 @@ class RuntimeManager:
             remaining.append("bhyve")
         if self._jail_exists(name):
             remaining.append("jail")
-        if isinstance(epair_host, str) and epair_host and self._interface_exists(epair_host):
+        if (
+            isinstance(epair_host, str)
+            and re.fullmatch(r"epair\d+a", epair_host)
+            and self._interface_exists(epair_host)
+        ):
             remaining.append(epair_host)
         if self._dataset_exists(dataset):
             remaining.append(dataset)
@@ -629,6 +645,8 @@ class RuntimeManager:
     def _registered(self) -> dict[str, dict[str, Any]]:
         records: dict[str, dict[str, Any]] = {}
         for path in sorted(self.registry_dir.glob(f"{RUNTIME_PREFIX}*.json")):
+            if path.is_symlink():
+                continue
             name = path.stem
             if not RUNTIME_NAME_RE.fullmatch(name):
                 continue
@@ -689,6 +707,14 @@ class RuntimeManager:
         stale_only: bool = True,
         requester_uid: int = 0,
     ) -> dict[str, Any]:
+        if (
+            isinstance(requester_uid, bool)
+            or not isinstance(requester_uid, int)
+            or requester_uid < 0
+        ):
+            raise PermissionError("Invalid requester UID")
+        if not isinstance(stale_only, bool):
+            raise ValueError("stale_only must be boolean")
         registered = self._registered()
         retained: set[str] = set()
         cleaned: list[str] = []
@@ -754,6 +780,8 @@ class RuntimeRequestHandler(socketserver.StreamRequestHandler):
         try:
             peer = freebsd_peer_credentials(self.request)
             raw = self.rfile.readline(MAX_REQUEST_BYTES + 1)
+            if not raw:
+                return
             if len(raw) > MAX_REQUEST_BYTES:
                 raise ValueError("request exceeded size limit")
             request = json.loads(raw.decode("utf-8"))
@@ -773,20 +801,35 @@ class RuntimeRequestHandler(socketserver.StreamRequestHandler):
         if action == "ping":
             return {"service": "freebsd-laboratory-runtime", "version": 2}
         if action == "create-jail":
+            name = request.get("name")
+            if not isinstance(name, str):
+                raise ValueError("name must be a string")
+            owner_pid = request.get("owner_pid")
+            if isinstance(owner_pid, bool) or not isinstance(owner_pid, int):
+                raise ValueError("owner_pid must be an integer process id")
             return self.manager.create_jail(
-                str(request.get("name", "")),
-                request.get("owner_pid"),
+                name,
+                owner_pid,
                 peer,
             )
         if action == "create-bhyve":
+            name = request.get("name")
+            if not isinstance(name, str):
+                raise ValueError("name must be a string")
+            owner_pid = request.get("owner_pid")
+            if isinstance(owner_pid, bool) or not isinstance(owner_pid, int):
+                raise ValueError("owner_pid must be an integer process id")
             return self.manager.create_bhyve(
-                str(request.get("name", "")),
-                request.get("owner_pid"),
+                name,
+                owner_pid,
                 peer,
             )
         if action == "destroy":
+            name = request.get("name")
+            if not isinstance(name, str):
+                raise ValueError("name must be a string")
             return self.manager.destroy(
-                str(request.get("name", "")),
+                name,
                 requester_uid=peer.uid,
             )
         if action == "gc":
@@ -797,10 +840,13 @@ class RuntimeRequestHandler(socketserver.StreamRequestHandler):
         raise ValueError("unsupported runtime action")
 
     def _reply(self, response: dict[str, Any]) -> None:
-        self.wfile.write(
-            json.dumps(response, sort_keys=True, separators=(",", ":")).encode("utf-8") + b"\n"
-        )
-        self.wfile.flush()
+        try:
+            self.wfile.write(
+                json.dumps(response, sort_keys=True, separators=(",", ":")).encode("utf-8") + b"\n"
+            )
+            self.wfile.flush()
+        except (BrokenPipeError, ConnectionResetError, OSError):
+            pass
 
 
 class ThreadingUnixServer(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
@@ -810,17 +856,28 @@ class ThreadingUnixServer(socketserver.ThreadingMixIn, socketserver.UnixStreamSe
 
 
 def _configure_socket(path: Path, group_name: str) -> None:
-    path.chmod(0o660)
+    """Grant the configured Jupyter group access to the root daemon socket.
+
+    Mode 0660 is intentional: the unprivileged Jupyter service must connect as
+    a member of the configured group. Filesystem access only permits a
+    connection; RuntimeRequestHandler authorizes every request using kernel
+    supplied LOCAL_PEERCRED before any privileged action is performed.
+    """
+
     try:
         group = grp.getgrnam(group_name)
     except KeyError as error:
         raise RuntimeError(f"Runtime socket group does not exist: {group_name}") from error
-    os.chown(path, 0, group.gr_gid)
+    os.chown(path, 0, group.gr_gid, follow_symlinks=False)
+    os.chmod(path, 0o660, follow_symlinks=False)
 
 
 def _prepare_socket_path(path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o755)
     if not path.exists() and not path.is_symlink():
+        return
+    if path.is_symlink():
+        path.unlink()
         return
     mode = path.lstat().st_mode
     if not stat.S_ISSOCK(mode):

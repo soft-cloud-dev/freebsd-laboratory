@@ -79,3 +79,41 @@ def test_destroy_rpc_failure_does_not_skip_local_cleanup(tmp_path: Path) -> None
     assert provisioner.guest_ip is None
     assert provisioner.known_hosts_file is None
     assert not runtime_path.exists()
+
+
+def test_load_provisioner_info_requires_complete_unique_port_sets() -> None:
+    provisioner = RemoteRuntimeProvisioner()
+    base_info = {
+        "kernel_id": "test-kernel",
+        "connection_info": {},
+        "pid": 1234,
+        "pgid": 1234,
+        "ip": "127.0.0.1",
+        "ports_cached": False,
+    }
+
+    asyncio.run(
+        provisioner.load_provisioner_info(
+            {
+                **base_info,
+                "original_connection_ports": [41001, 41002, 41003],
+                "tunnel_ports": [42001, 42001, 42003, 42004, 42005],
+            }
+        )
+    )
+
+    assert provisioner._original_connection_ports == ()
+    assert provisioner._tunnel_ports == ()
+
+    asyncio.run(
+        provisioner.load_provisioner_info(
+            {
+                **base_info,
+                "original_connection_ports": [41001, 41002, 41003, 41004, 41005],
+                "tunnel_ports": [42001, 42002, 42003, 42004, 42005],
+            }
+        )
+    )
+
+    assert provisioner._original_connection_ports == (41001, 41002, 41003, 41004, 41005)
+    assert provisioner._tunnel_ports == (42001, 42002, 42003, 42004, 42005)

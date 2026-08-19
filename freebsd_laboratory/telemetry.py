@@ -5,7 +5,10 @@ import re
 from collections.abc import Mapping
 from typing import Any
 
-import sentry_sdk
+try:
+    import sentry_sdk
+except ImportError:  # pragma: no cover
+    sentry_sdk = None  # type: ignore[assignment]
 
 
 _SENSITIVE_KEY_PARTS = (
@@ -54,7 +57,7 @@ def _before_send(event: dict[str, Any], hint: dict[str, Any]) -> dict[str, Any]:
 def init_sentry(component: str) -> bool:
     """Initialize Sentry when SENTRY_DSN is explicitly configured."""
     dsn = os.getenv("SENTRY_DSN")
-    if not dsn:
+    if not dsn or sentry_sdk is None:
         return False
 
     if not sentry_sdk.is_initialized():
@@ -84,6 +87,8 @@ def capture_exception(
     operation: str,
 ) -> str | None:
     """Capture one operational exception with stable component and operation tags."""
+    if sentry_sdk is None:
+        return None
     if not sentry_sdk.is_initialized() and not init_sentry(component):
         return None
 
@@ -108,6 +113,8 @@ def capture_kernel_error(
     access and notebook contents are not copied into telemetry.
     """
     component = "jupyter-kernel"
+    if sentry_sdk is None:
+        return None
     if not sentry_sdk.is_initialized() and not init_sentry(component):
         return None
 
@@ -139,7 +146,7 @@ def capture_kernel_error(
 
 
 def flush_sentry(timeout: float = 2.0) -> None:
-    if sentry_sdk.is_initialized():
+    if sentry_sdk is not None and sentry_sdk.is_initialized():
         sentry_sdk.flush(timeout=timeout)
 
 
