@@ -177,9 +177,11 @@ def run_diagnostics(
         scope.set_tag("component", "sentry-diagnostics")
         scope.set_tag("project", "freebsd-laboratory")
         scope.set_tag("diagnostic", "true")
-        event_id = scope.capture_message(
-            "FreeBSD Laboratory Sentry diagnostic test event",
-            level="error",
+        event_id = scope.capture_event(
+            {
+                "level": "error",
+                "message": "FreeBSD Laboratory Sentry diagnostic test event",
+            }
         )
 
     telemetry.flush_sentry(timeout=max(timeout, 2.0))
