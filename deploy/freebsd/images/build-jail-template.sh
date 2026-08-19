@@ -11,6 +11,7 @@ if [ "$(id -u)" -ne 0 ]; then
 fi
 
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+SSHD_POLICY="${SCRIPT_DIR}/sshd-freebsd-lab.conf"
 LAB_JAIL_IMAGE_MODE=${LAB_JAIL_IMAGE_MODE:-release}
 BUILD_ID=${BUILD_ID:-$(date -u +%Y%m%dT%H%M%SZ)}
 JAIL_DATASET_PREFIX=${JAIL_DATASET_PREFIX:-zroot/jails/templates/freebsd-python-${LAB_JAIL_IMAGE_MODE}}
@@ -49,7 +50,6 @@ DATASET="${JAIL_DATASET_PREFIX}-${BUILD_ID}"
 DATASET_PARENT=${DATASET%/*}
 ROOT="${JAIL_MOUNT_ROOT%/}/$(basename "$DATASET")"
 SNAPSHOT="${DATASET}@clean"
-SSHD_POLICY="${SCRIPT_DIR}/sshd-freebsd-lab.conf"
 BUILT_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 DATASET_CREATED=NO
 TMP_DIR=""
@@ -116,20 +116,8 @@ if [ "$LAB_JAIL_IMAGE_MODE" = "release" ]; then
                 LAB_RELEASE_TARGET=arm64
                 LAB_RELEASE_TARGET_ARCH=aarch64
                 ;;
-            armv7)
-                LAB_RELEASE_TARGET=arm
-                LAB_RELEASE_TARGET_ARCH=armv7
-                ;;
-            powerpc64|powerpc64le)
-                LAB_RELEASE_TARGET=powerpc
-                LAB_RELEASE_TARGET_ARCH=$HOST_ARCH
-                ;;
-            riscv64)
-                LAB_RELEASE_TARGET=riscv
-                LAB_RELEASE_TARGET_ARCH=riscv64
-                ;;
             *)
-                echo "Unsupported FreeBSD release architecture: $HOST_ARCH" >&2
+                echo "Automatic release URL mapping is supported for amd64 and aarch64 only: $HOST_ARCH" >&2
                 echo "Set LAB_RELEASE_TARGET and LAB_RELEASE_TARGET_ARCH explicitly." >&2
                 exit 1
                 ;;
@@ -146,8 +134,8 @@ if [ "$LAB_JAIL_IMAGE_MODE" = "release" ]; then
     fetch -q -o "$TMP_DIR/MANIFEST" "$RELEASE_URL/MANIFEST"
     install -m 0644 "$TMP_DIR/MANIFEST" "$MANIFEST_FILE"
     RELEASE_MANIFEST_SHA256=$(sha256 -q "$MANIFEST_FILE")
-    EXPECTED_BASE_SHA256=$(awk -F '\t' '$1 == "base.txz" {print $2; exit}' "$MANIFEST_FILE")
-    if ! printf '%s\n' "$EXPECTED_BASE_SHA256" | grep -Eq '^[0-9A-Fa-f]{64}$'; then
+    EXPECTED_BASE_SHA256=$(awk -F '\t' '$1 == "base.txz" {print $2; exit}' "$MANIFEST_FILE" | tr 'A-F' 'a-f')
+    if ! printf '%s\n' "$EXPECTED_BASE_SHA256" | grep -Eq '^[0-9a-f]{64}$'; then
         echo "Official release MANIFEST does not contain a valid base.txz SHA-256" >&2
         exit 1
     fi
@@ -175,7 +163,7 @@ if [ "$LAB_JAIL_IMAGE_MODE" = "release" ]; then
         exit 1
     fi
 
-    tar -xpf "$BASE_ARCHIVE" -C "$ROOT"
+    tar -xpf "$BASE_ARCHIVE" -C "$ROOT" --unlink
 else
     for command in git make; do
         if ! command -v "$command" >/dev/null 2>&1; then
