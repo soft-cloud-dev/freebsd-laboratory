@@ -118,6 +118,20 @@ def test_release_builder_verifies_official_base_distribution() -> None:
     assert '"base_sha256": "${BASE_SHA256}"' in text
 
 
+def test_jail_builder_resolves_packages_against_target_abi() -> None:
+    text = jail_builder_text()
+    assert 'TARGET_ABI_FILE="$ROOT/bin/sh"' in text
+    assert '-o "ABI_FILE=$TARGET_ABI_FILE"' in text
+    assert 'TARGET_ABI=$(pkg -o "ABI_FILE=$TARGET_ABI_FILE" -r "$ROOT" config abi)' in text
+    assert 'pkg_root update -f' in text
+    assert 'pkg_root install -y $LAB_JAIL_PACKAGES' in text
+    assert 'chroot "$ROOT" /usr/bin/ldd /usr/local/bin/python3' in text
+    assert 'Jail Python has unresolved shared libraries for target ABI $TARGET_ABI' in text
+    assert '"package_abi": "${TARGET_ABI}"' in text
+    assert 'libutil.so.9' not in text
+    assert 'ln -s /lib/libutil' not in text
+
+
 def test_source_mode_retains_buildworld_installworld_pipeline() -> None:
     bootstrap = bootstrap_text()
     builder = jail_builder_text()
