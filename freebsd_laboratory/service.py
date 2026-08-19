@@ -95,6 +95,33 @@ def redact_payload(value: Any) -> Any:
     return value
 
 
+def minimize_persisted_payload(kind: str, payload: dict[str, Any]) -> dict[str, Any]:
+    """Remove transient cell source after deriving a reproducible identity."""
+
+    if kind != "cell-executed":
+        return payload
+
+    minimized = dict(payload)
+    cell_value = minimized.get("cell")
+    if not isinstance(cell_value, dict):
+        raise ValueError("cell-executed payload requires a cell object")
+    cell = dict(cell_value)
+    source = cell.pop("source", "")
+    if isinstance(source, list):
+        if not all(isinstance(part, str) for part in source):
+            raise ValueError("Cell source list must contain only strings")
+        source_text = "".join(source)
+    elif isinstance(source, str):
+        source_text = source
+    else:
+        raise ValueError("Cell source must be a string or string list")
+    source_bytes = source_text.encode("utf-8")
+    cell["source_sha256"] = sha256_bytes(source_bytes)
+    cell["source_bytes"] = len(source_bytes)
+    minimized["cell"] = cell
+    return minimized
+
+
 @dataclass(frozen=True)
 class EvidenceEvent:
     sequence: int
@@ -217,15 +244,18 @@ class LabService:
         if not isinstance(payload, dict):
             raise ValueError("Event payload must be a mapping")
 
-        safe_payload = redact_payload(payload)
-        if not isinstance(safe_payload, dict):
+        redacted_payload = redact_payload(payload)
+        if not isinstance(redacted_payload, dict):
             raise ValueError("Redacted event payload must be a mapping")
-        payload_bytes = canonical_json(safe_payload)
-        if len(payload_bytes) > self.max_event_payload_bytes:
+        incoming_bytes = canonical_json(redacted_payload)
+        if len(incoming_bytes) > self.max_event_payload_bytes:
             raise EvidencePayloadTooLarge(
-                f"Event payload is {len(payload_bytes)} bytes; "
+                f"Event payload is {len(incoming_bytes)} bytes; "
                 f"limit is {self.max_event_payload_bytes}"
             )
+
+        safe_payload = minimize_persisted_payload(kind, redacted_payload)
+        payload_bytes = canonical_json(safe_payload)
 
         with self._lock:
             if len(self._events) >= self.max_events:
