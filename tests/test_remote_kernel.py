@@ -6,6 +6,7 @@ import socket
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from threading import Barrier
+from unittest.mock import patch
 
 import pytest
 
@@ -224,7 +225,8 @@ def test_ssh_transport_accepts_default_device_config(tmp_path: Path) -> None:
         scp_command="/bin/sh",
     )
 
-    transport.assert_available()
+    with patch.object(Path, "exists", side_effect=AssertionError("must not stat /dev/null")):
+        transport.assert_available()
 
 
 def test_ssh_transport_rejects_directory_as_config(tmp_path: Path) -> None:
