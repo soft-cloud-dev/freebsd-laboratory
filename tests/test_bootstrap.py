@@ -58,7 +58,10 @@ def test_bootstrap_registers_server_extension_without_broken_enable_cli() -> Non
     assert '"freebsd_laboratory": true' in text
     assert 'ExtensionPackage(name="freebsd_laboratory", enabled=True)' in text
     assert "server extension enable" not in text
-    assert "import freebsd_laboratory, jupyter_core, jupyter_server, jupyterlab" in text
+    assert (
+        "import freebsd_laboratory, jupyter_builder, jupyter_core, jupyter_server, jupyterlab"
+        in text
+    )
 
 
 def test_bootstrap_registers_prebuilt_labextension() -> None:
