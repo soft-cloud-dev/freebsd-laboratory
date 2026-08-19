@@ -106,11 +106,31 @@ class RuntimeClient:
     def ping(self) -> dict[str, Any]:
         return self.request("ping")
 
-    def create_jail(self, name: str, owner_pid: int) -> dict[str, Any]:
-        return self.request("create-jail", name=name, owner_pid=owner_pid)
+    def create_jail(
+        self,
+        name: str,
+        owner_pid: int,
+        ssh_public_key: str,
+    ) -> dict[str, Any]:
+        return self.request(
+            "create-jail",
+            name=name,
+            owner_pid=owner_pid,
+            ssh_public_key=ssh_public_key,
+        )
 
-    def create_bhyve(self, name: str, owner_pid: int) -> dict[str, Any]:
-        return self.request("create-bhyve", name=name, owner_pid=owner_pid)
+    def create_bhyve(
+        self,
+        name: str,
+        owner_pid: int,
+        ssh_public_key: str,
+    ) -> dict[str, Any]:
+        return self.request(
+            "create-bhyve",
+            name=name,
+            owner_pid=owner_pid,
+            ssh_public_key=ssh_public_key,
+        )
 
     def destroy(self, name: str) -> dict[str, Any]:
         return self.request("destroy", name=name)
