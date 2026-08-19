@@ -236,6 +236,22 @@ if ! grep -Eq '^sshd_enable=' "$ROOT/etc/rc.conf"; then
     printf 'sshd_enable="YES"\n' >> "$ROOT/etc/rc.conf"
 fi
 
+# A newly extracted/chrooted FreeBSD root has not run the boot-time ldconfig
+# rc.d step yet.  Python and gettext libraries installed by pkg live under
+# /usr/local/lib, which is normally added to the ELF hints file by that step.
+# Seed the same target-root hints before validation and keep them in the golden
+# image because laboratory jails intentionally do not run the full /etc/rc path.
+install -d -m 0755 "$ROOT/var/run"
+if [ ! -x "$ROOT/etc/rc.d/ldconfig" ]; then
+    echo "Target ldconfig rc.d script is unavailable: $ROOT/etc/rc.d/ldconfig" >&2
+    exit 1
+fi
+chroot "$ROOT" /etc/rc.d/ldconfig onestart
+if [ ! -s "$ROOT/var/run/ld-elf.so.hints" ]; then
+    echo "Target ldconfig did not create /var/run/ld-elf.so.hints" >&2
+    exit 1
+fi
+
 PYTHON_LDD=$(chroot "$ROOT" /usr/bin/ldd /usr/local/bin/python3 2>&1 || true)
 if printf '%s\n' "$PYTHON_LDD" | grep -q 'not found'; then
     printf '%s\n' "$PYTHON_LDD" >&2
