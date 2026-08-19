@@ -5,11 +5,17 @@ from pathlib import Path
 
 
 BOOTSTRAP = Path("deploy/freebsd/bootstrap.sh")
+JAIL_BUILDER = Path("deploy/freebsd/images/build-jail-template.sh")
+GOLDEN_BUILDER = Path("deploy/freebsd/images/build-golden-images.sh")
 LABEXTENSION_PACKAGE = Path("labextension/package.json")
 
 
 def bootstrap_text() -> str:
     return BOOTSTRAP.read_text(encoding="utf-8")
+
+
+def jail_builder_text() -> str:
+    return JAIL_BUILDER.read_text(encoding="utf-8")
 
 
 def test_bootstrap_keeps_root_daemon_out_of_user_checkout() -> None:
@@ -90,10 +96,49 @@ def test_bootstrap_prepares_user_owned_jupyter_paths() -> None:
     )
 
 
-def test_bootstrap_builds_and_proves_real_jail_boundary() -> None:
+def test_bootstrap_defaults_to_official_release_image_mode() -> None:
     text = bootstrap_text()
-    assert 'LAB_SRC_BRANCH="releng/$RELEASE_SERIES"' in text
-    assert 'make -C "$LAB_SRC_DIR" -j"$JOBS" buildworld' in text
+    assert 'LAB_JAIL_IMAGE_MODE=${LAB_JAIL_IMAGE_MODE:-release}' in text
+    assert 'LAB_RELEASE_BASE_URL=${LAB_RELEASE_BASE_URL:-https://download.freebsd.org/releases}' in text
+    assert 'SNAPSHOT_PREFIX="${JAIL_TEMPLATE_PARENT}/freebsd-python-${LAB_JAIL_IMAGE_MODE}"' in text
+    assert 'LAB_JAIL_IMAGE_MODE=release' in text
+    assert 'LAB_RELEASE="$LAB_RELEASE"' in text
+
+
+def test_release_builder_verifies_official_base_distribution() -> None:
+    text = jail_builder_text()
+    assert 'LAB_JAIL_IMAGE_MODE=${LAB_JAIL_IMAGE_MODE:-release}' in text
+    assert 'fetch -q -o "$TMP_DIR/MANIFEST" "$RELEASE_URL/MANIFEST"' in text
+    assert '$1 == "base.txz"' in text
+    assert 'fetch -q -o "$TMP_DIR/base.txz" "$RELEASE_URL/base.txz"' in text
+    assert 'DOWNLOADED_BASE_SHA256=$(sha256 -q "$TMP_DIR/base.txz")' in text
+    assert 'if [ "$DOWNLOADED_BASE_SHA256" != "$EXPECTED_BASE_SHA256" ]' in text
+    assert 'tar -xpf "$BASE_ARCHIVE" -C "$ROOT" --unlink' in text
+    assert '"image_mode": "release"' in text
+    assert '"base_sha256": "${BASE_SHA256}"' in text
+
+
+def test_source_mode_retains_buildworld_installworld_pipeline() -> None:
+    bootstrap = bootstrap_text()
+    builder = jail_builder_text()
+    assert 'LAB_JAIL_IMAGE_MODE=source' in bootstrap
+    assert 'LAB_SRC_BRANCH="releng/$RELEASE_SERIES"' in bootstrap
+    assert 'make -C "$LAB_SRC_DIR" -j"$JOBS" buildworld' in bootstrap
+    assert 'rmdir "$LAB_SRC_DIR"' not in bootstrap
+    assert 'make -C "$SRC_DIR" installworld DESTDIR="$ROOT"' in builder
+    assert 'make -C "$SRC_DIR" distribution DESTDIR="$ROOT"' in builder
+    assert '"image_mode": "source"' in builder
+    assert '"source_revision": "${SOURCE_REVISION}"' in builder
+
+
+def test_paired_golden_images_explicitly_use_source_jail_mode() -> None:
+    text = GOLDEN_BUILDER.read_text(encoding="utf-8")
+    assert 'LAB_JAIL_IMAGE_MODE=source' in text
+    assert 'buildworld buildkernel' in text
+
+
+def test_bootstrap_proves_real_jail_boundary() -> None:
+    text = bootstrap_text()
     assert 'LAB_JAIL_PACKAGES="python3 ${PY_TAG}-ipykernel"' in text
     assert 'build-jail-template.sh' in text
     assert 'security.jail.jailed' in text
