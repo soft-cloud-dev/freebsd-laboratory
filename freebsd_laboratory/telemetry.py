@@ -52,7 +52,7 @@ def _before_send(event: dict[str, Any], hint: dict[str, Any]) -> dict[str, Any]:
 
 
 def init_sentry(component: str) -> bool:
-    """Initialize Sentry only when SENTRY_DSN is explicitly configured."""
+    """Initialize Sentry when SENTRY_DSN is explicitly configured."""
     dsn = os.getenv("SENTRY_DSN")
     if not dsn:
         return False
@@ -63,7 +63,7 @@ def init_sentry(component: str) -> bool:
             environment=os.getenv("SENTRY_ENVIRONMENT", "lab"),
             release=os.getenv("SENTRY_RELEASE"),
             server_name=os.getenv("SENTRY_SERVER_NAME", "freebsd-laboratory"),
-            send_default_pii=False,
+            send_default_pii=True,
             include_local_variables=False,
             include_source_context=False,
             max_request_body_size="never",
@@ -83,7 +83,7 @@ def capture_exception(
     component: str,
     operation: str,
 ) -> str | None:
-    """Capture one operational exception without attaching request or notebook payloads."""
+    """Capture one operational exception with stable component and operation tags."""
     if not sentry_sdk.is_initialized() and not init_sentry(component):
         return None
 
