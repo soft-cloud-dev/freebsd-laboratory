@@ -600,7 +600,9 @@ class RuntimeManager:
         if not isinstance(dataset, str) or not dataset:
             dataset = self._jail_dataset(name)
         if self._dataset_exists(dataset):
-            result = self._run(["zfs", "destroy", "-r", dataset], check=False, timeout=60)
+            result = self._run(
+                ["zfs", "destroy", "-r", "-f", dataset], check=False, timeout=60
+            )
             if result.returncode == 0:
                 removed.append(dataset)
 
