@@ -163,7 +163,8 @@ pkg install -y \
     "${PY_TAG}-ipykernel" \
     "${PY_TAG}-cryptography" \
     "${PY_TAG}-pytest" \
-    "${PY_TAG}-pyyaml"
+    "${PY_TAG}-pyyaml" \
+    "${PY_TAG}-sentry-sdk"
 
 log "Preparing repository at $LAB_REPO_DIR"
 if [ -d "$LAB_REPO_DIR/.git" ]; then
@@ -238,6 +239,7 @@ install -d -o root -g wheel -m 0755 "$(dirname "$LAB_DAEMON_VENV")"
 $PYTHON -m venv --system-site-packages "$LAB_DAEMON_VENV"
 "$LAB_DAEMON_VENV/bin/python" -m pip install \
     --no-deps "$LAB_REPO_DIR"
+"$LAB_DAEMON_VENV/bin/python" -c 'import freebsd_laboratory, sentry_sdk'
 chown -R root:wheel "$LAB_DAEMON_VENV"
 chmod -R go-w "$LAB_DAEMON_VENV"
 
@@ -250,7 +252,7 @@ $PYTHON -m venv --system-site-packages "$JUPYTER_VENV"
     --no-deps --ignore-installed "jupyter_builder>=1.2,<2"
 
 "$JUPYTER_VENV/bin/python" -c \
-    'import freebsd_laboratory, jupyter_builder, jupyter_core, jupyter_server, jupyterlab'
+    'import freebsd_laboratory, jupyter_builder, jupyter_core, jupyter_server, jupyterlab, sentry_sdk'
 [ -x "$JUPYTER_VENV/bin/jupyter-builder" ] || fail "jupyter-builder entrypoint is missing"
 install_python_entrypoint "$JUPYTER_VENV/bin/jupyter" jupyter_core.command main
 install_python_entrypoint "$JUPYTER_VENV/bin/jupyter-server" jupyter_server.serverapp main
