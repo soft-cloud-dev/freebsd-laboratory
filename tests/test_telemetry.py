@@ -12,7 +12,7 @@ def test_init_sentry_is_disabled_without_dsn(monkeypatch) -> None:
     assert telemetry.init_sentry("test") is False
 
 
-def test_init_sentry_uses_configured_dsn_and_pii(monkeypatch) -> None:
+def test_init_sentry_disables_default_pii(monkeypatch) -> None:
     monkeypatch.setenv("SENTRY_DSN", "https://public@example.invalid/1")
     monkeypatch.setenv("SENTRY_ENVIRONMENT", "test")
     monkeypatch.setenv("SENTRY_RELEASE", "deadbeef")
@@ -33,12 +33,12 @@ def test_init_sentry_uses_configured_dsn_and_pii(monkeypatch) -> None:
     assert kwargs["dsn"] == "https://public@example.invalid/1"
     assert kwargs["environment"] == "test"
     assert kwargs["release"] == "deadbeef"
-    assert kwargs["send_default_pii"] is True
+    assert kwargs["send_default_pii"] is False
     assert kwargs["traces_sample_rate"] is None
     assert kwargs["before_send"] is telemetry._before_send
 
 
-def test_before_send_preserves_pii_but_filters_credentials() -> None:
+def test_before_send_filters_credentials() -> None:
     event = {
         "user": {
             "email": "operator@example.invalid",
@@ -64,7 +64,7 @@ def test_before_send_preserves_pii_but_filters_credentials() -> None:
     assert result["extra"]["message"] == "password=[Filtered] command failed"
 
 
-def test_capture_kernel_error_uses_host_scope_without_notebook_traceback(monkeypatch) -> None:
+def test_capture_kernel_error_sends_only_sanitized_class(monkeypatch) -> None:
     scope = Mock()
     scope.capture_event.return_value = "event-id"
     monkeypatch.setattr(telemetry.sentry_sdk, "is_initialized", lambda: True)
@@ -75,21 +75,23 @@ def test_capture_kernel_error_uses_host_scope_without_notebook_traceback(monkeyp
     )
 
     result = telemetry.capture_kernel_error(
-        "ZeroDivisionError",
-        "division by zero",
-        kernel_name="freebsd-python-bhyve",
+        "ValueError\nAuthorization=secret-token",
+        "password=hunter2 notebook=/home/operator/private.ipynb",
+        kernel_name="private-user-kernel",
     )
 
     assert result == "event-id"
     event = scope.capture_event.call_args.args[0]
     exception = event["exception"]["values"][0]
     assert event["level"] == "error"
-    assert exception["type"] == "ZeroDivisionError"
-    assert exception["value"] == "division by zero"
+    assert exception["type"] == "ValueError_Authorization_secret-token"
+    assert exception["value"] == "Kernel execution failed"
+    assert "hunter2" not in str(event)
+    assert "private.ipynb" not in str(event)
     assert "traceback" not in event
     scope.set_tag.assert_any_call("component", "jupyter-kernel")
     scope.set_tag.assert_any_call("operation", "kernel:execute")
-    scope.set_tag.assert_any_call("kernel_name", "freebsd-python-bhyve")
+    assert all(call.args[0] != "kernel_name" for call in scope.set_tag.call_args_list)
 
 
 def test_capture_kernel_error_is_disabled_without_dsn(monkeypatch) -> None:
