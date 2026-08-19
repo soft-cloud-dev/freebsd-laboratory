@@ -19,7 +19,7 @@ def test_labextension_targets_freebsd_jupyterlab_46_family() -> None:
         "@jupyterlab/services": "7.6.1",
         "@lumino/widgets": "2.8.0",
     }
-    assert package["devDependencies"]["@jupyterlab/builder"] == "4.5.6"
+    assert package["devDependencies"]["@jupyterlab/builder"] == "4.3.0"
     assert package["scripts"]["build"].startswith("npm run clean &&")
 
 
