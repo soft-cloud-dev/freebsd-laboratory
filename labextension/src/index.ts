@@ -273,11 +273,11 @@ const plugin: JupyterFrontEndPlugin<void> = {
   autoStart: true,
   requires: [INotebookTracker],
   optional: [ICommandPalette],
-  activate: async (
+  activate: (
     app: JupyterFrontEnd,
     tracker: INotebookTracker,
     palette: ICommandPalette | null
-  ): Promise<void> => {
+  ): void => {
     const progression = new ProgressionPanel();
     const attachedNotebooks = new WeakSet<NotebookPanel>();
     app.shell.add(progression, 'right', { rank: 900 });
@@ -334,10 +334,15 @@ const plugin: JupyterFrontEndPlugin<void> = {
       void attachNotebook(panel);
     });
 
-    await tracker.restored;
-    tracker.forEach(panel => {
-      void attachNotebook(panel);
-    });
+    void tracker.restored
+      .then(() => {
+        tracker.forEach(panel => {
+          void attachNotebook(panel);
+        });
+      })
+      .catch(error => {
+        console.error('FreeBSD Laboratory notebook restoration failed', error);
+      });
 
     NotebookActions.executed.connect((_sender, args) => {
       const panel = tracker.find(candidate => candidate.content === args.notebook);
@@ -361,7 +366,7 @@ const plugin: JupyterFrontEndPlugin<void> = {
         });
     });
 
-    await progression.refresh();
+    void progression.refresh();
     app.shell.activateById(progression.id);
   }
 };
