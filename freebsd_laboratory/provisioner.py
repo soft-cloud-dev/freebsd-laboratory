@@ -25,8 +25,13 @@ class FreeBSDJailProvisioner(RemoteRuntimeProvisioner):
     def jail_name(self, value: str | None) -> None:
         self._runtime_name = value
 
-    def _request_create(self, name: str, owner_pid: int) -> dict[str, Any]:
-        return self._client().create_jail(name, owner_pid)
+    def _request_create(
+        self,
+        name: str,
+        owner_pid: int,
+        ssh_public_key: str,
+    ) -> dict[str, Any]:
+        return self._client().create_jail(name, owner_pid, ssh_public_key)
 
 
 __all__ = ["FreeBSDJailProvisioner", "runtime_name"]

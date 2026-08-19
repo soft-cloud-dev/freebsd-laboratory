@@ -99,7 +99,6 @@ LAB_ADDRESS_END=${LAB_ADDRESS_END:-172.31.254.199}
 LAB_JAIL_MOUNT_ROOT=${LAB_JAIL_MOUNT_ROOT:-/usr/local/jails/containers}
 LAB_CONFIGURE_PF=${LAB_CONFIGURE_PF:-YES}
 LAB_PF_CONF=${LAB_PF_CONF:-/etc/pf.conf}
-LAB_SSH_KEY=${LAB_SSH_KEY:-/usr/local/etc/freebsd-laboratory/id_ed25519}
 
 case "$LAB_JAIL_IMAGE_MODE" in
     release|source) ;;
@@ -113,11 +112,18 @@ if [ -z "$LAB_JUPYTER_USER" ]; then
     if pw usershow freebsd >/dev/null 2>&1; then
         LAB_JUPYTER_USER=freebsd
     else
-        LAB_JUPYTER_USER=root
+        fail "Set LAB_JUPYTER_USER to an existing non-root account; freebsd does not exist"
     fi
 fi
 if ! pw usershow "$LAB_JUPYTER_USER" >/dev/null 2>&1; then
     fail "Jupyter user does not exist: $LAB_JUPYTER_USER"
+fi
+JUPYTER_UID=$(pw usershow -n "$LAB_JUPYTER_USER" -7 | awk -F: '{print $3}')
+case "$JUPYTER_UID" in
+    ''|*[!0-9]*) fail "Unable to determine uid for $LAB_JUPYTER_USER" ;;
+esac
+if [ "$JUPYTER_UID" -eq 0 ]; then
+    fail "Jupyter must run as a non-root account: $LAB_JUPYTER_USER"
 fi
 
 JUPYTER_HOME=$(pw usershow -n "$LAB_JUPYTER_USER" -7 | awk -F: '{print $6}')
@@ -177,19 +183,10 @@ fi
 [ -f "$LAB_REPO_DIR/pyproject.toml" ] || fail "Repository pyproject.toml is missing"
 [ -f "$LAB_REPO_DIR/lab.yaml" ] || fail "Repository lab.yaml is missing"
 
-log "Creating operator group, SSH transport key, and host state"
+log "Creating operator group and host state"
 pw groupshow "$LAB_GROUP" >/dev/null 2>&1 || pw groupadd "$LAB_GROUP"
 pw groupmod "$LAB_GROUP" -m "$LAB_JUPYTER_USER"
-
 install -d -o root -g "$LAB_GROUP" -m 0750 /usr/local/etc/freebsd-laboratory
-if [ ! -f "$LAB_SSH_KEY" ]; then
-    ssh-keygen -q -t ed25519 -N '' -f "$LAB_SSH_KEY"
-fi
-[ -f "${LAB_SSH_KEY}.pub" ] || fail "SSH public key is missing: ${LAB_SSH_KEY}.pub"
-chown root:"$LAB_GROUP" "$LAB_SSH_KEY"
-chmod 0640 "$LAB_SSH_KEY"
-chown root:wheel "${LAB_SSH_KEY}.pub"
-chmod 0644 "${LAB_SSH_KEY}.pub"
 
 if [ -z "$LAB_ZFS_POOL" ]; then
     if zpool list -H -o name zroot >/dev/null 2>&1; then
@@ -442,7 +439,7 @@ sysrc "freebsd_lab_daemon_address_start=$LAB_ADDRESS_START"
 sysrc "freebsd_lab_daemon_address_end=$LAB_ADDRESS_END"
 sysrc "freebsd_lab_daemon_bridge=$LAB_BRIDGE_NAME"
 
-RUNTIME_ARGS="--jail-dataset-parent=$JAIL_DATASET_PARENT --jail-mount-root=$LAB_JAIL_MOUNT_ROOT --ssh-public-key=${LAB_SSH_KEY}.pub"
+RUNTIME_ARGS="--jail-dataset-parent=$JAIL_DATASET_PARENT --jail-mount-root=$LAB_JAIL_MOUNT_ROOT"
 if [ -n "$ACTIVE_SNAPSHOT" ]; then
     RUNTIME_ARGS="--jail-template=$ACTIVE_SNAPSHOT $RUNTIME_ARGS"
 fi
@@ -526,6 +523,9 @@ if is_yes "$LAB_SMOKE_TEST" && [ -n "$ACTIVE_SNAPSHOT" ]; then
     log "Running a real VNET jail smoke test"
     SMOKE_SUFFIX="bs$$"
     SMOKE_NAME="freebsd-lab-$SMOKE_SUFFIX"
+    SMOKE_KEY_DIR=$(mktemp -d /tmp/freebsd-lab-smoke-key.XXXXXX)
+    ssh-keygen -q -t ed25519 -N '' -f "$SMOKE_KEY_DIR/id_ed25519"
+    chmod 0600 "$SMOKE_KEY_DIR/id_ed25519" "$SMOKE_KEY_DIR/id_ed25519.pub"
     cleanup_smoke()
     {
         "$JUPYTER_VENV/bin/python" - "$SMOKE_NAME" <<'PY' >/dev/null 2>&1 || true
@@ -533,13 +533,16 @@ import sys
 from freebsd_laboratory.runtime_client import RuntimeClient
 RuntimeClient().destroy(sys.argv[1])
 PY
+        rm -rf "$SMOKE_KEY_DIR"
     }
     trap cleanup_smoke EXIT HUP INT TERM
-    "$JUPYTER_VENV/bin/python" - "$SMOKE_NAME" <<'PY'
+    "$JUPYTER_VENV/bin/python" - "$SMOKE_NAME" "$SMOKE_KEY_DIR/id_ed25519.pub" <<'PY'
 import os
+from pathlib import Path
 import sys
 from freebsd_laboratory.runtime_client import RuntimeClient
-print(RuntimeClient().create_jail(sys.argv[1], os.getpid()))
+public_key = Path(sys.argv[2]).read_text(encoding="utf-8").strip()
+print(RuntimeClient().create_jail(sys.argv[1], os.getpid(), public_key))
 PY
     JAILED=$(jexec "$SMOKE_NAME" sysctl -n security.jail.jailed)
     [ "$JAILED" = "1" ] || fail "Smoke runtime is not jailed: security.jail.jailed=$JAILED"

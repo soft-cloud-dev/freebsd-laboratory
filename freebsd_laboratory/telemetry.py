@@ -25,6 +25,7 @@ _SENSITIVE_KEY_PARTS = (
 _INLINE_SECRET_RE = re.compile(
     r"(?i)(authorization|password|passwd|token|secret|api[_-]?key)([=:]\s*)([^\s,;]+)"
 )
+_SAFE_EXCEPTION_TYPE_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_.]{0,199}$")
 
 
 def _is_sensitive_key(key: object) -> bool:
@@ -66,7 +67,7 @@ def init_sentry(component: str) -> bool:
             environment=os.getenv("SENTRY_ENVIRONMENT", "lab"),
             release=os.getenv("SENTRY_RELEASE"),
             server_name=os.getenv("SENTRY_SERVER_NAME", "freebsd-laboratory"),
-            send_default_pii=True,
+            send_default_pii=False,
             include_local_variables=False,
             include_source_context=False,
             max_request_body_size="never",
@@ -105,28 +106,28 @@ def capture_kernel_error(
     *,
     kernel_name: str | None = None,
 ) -> str | None:
-    """Report a notebook execution error from the host Jupyter process.
+    """Report only a sanitized kernel exception class from the host Jupyter process.
 
-    Only the exception type and value are forwarded. Notebook source, rendered
-    traceback lines, kernel IDs, guest addresses, and connection metadata are
-    deliberately excluded so isolated runtimes do not need outbound network
-    access and notebook contents are not copied into telemetry.
+    Notebook source, exception values, rendered traceback lines, kernel IDs,
+    guest addresses, and connection metadata are deliberately excluded so
+    notebook data and credentials cannot be copied into telemetry by default.
     """
+    del error_value, kernel_name
     component = "jupyter-kernel"
     if sentry_sdk is None:
         return None
     if not sentry_sdk.is_initialized() and not init_sentry(component):
         return None
 
-    name = str(error_name or "KernelExecutionError")[:200]
-    value = str(error_value or "Kernel execution failed")[:2000]
+    raw_name = str(error_name or "KernelExecutionError")[:200]
+    name = raw_name if _SAFE_EXCEPTION_TYPE_RE.fullmatch(raw_name) else "KernelExecutionError"
     event: dict[str, Any] = {
         "level": "error",
         "exception": {
             "values": [
                 {
                     "type": name,
-                    "value": value,
+                    "value": "Kernel execution failed",
                     "mechanism": {
                         "type": "jupyter-kernel",
                         "handled": True,
@@ -140,8 +141,6 @@ def capture_kernel_error(
         scope.set_tag("component", component)
         scope.set_tag("operation", "kernel:execute")
         scope.set_tag("project", "freebsd-laboratory")
-        if kernel_name:
-            scope.set_tag("kernel_name", kernel_name[:200])
         return scope.capture_event(event)
 
 

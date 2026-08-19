@@ -9,6 +9,12 @@ lab_net = "172.31.254.0/24"
 lab_host = "172.31.254.1"
 lab_ssh_port = "22"
 
+# IPv6 is not part of the laboratory transport contract. Fail closed before
+# any IPv4-specific rules so link-local or autoconfigured addresses cannot
+# bypass the isolation policy.
+block in log quick on $lab_if inet6 all
+block out log quick on $lab_if inet6 all
+
 # Allow only the host-originated SSH transport. PF state permits reply traffic
 # for this session, including the Jupyter local-forward channels carried inside
 # the encrypted SSH connection.

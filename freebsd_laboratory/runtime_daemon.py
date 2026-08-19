@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import argparse
+import base64
+import binascii
 import grp
 import ipaddress
 import json
@@ -13,7 +15,9 @@ import stat
 import subprocess
 import sys
 import tempfile
+import threading
 from dataclasses import dataclass
+from functools import wraps
 from pathlib import Path
 from typing import Any, Sequence
 
@@ -26,6 +30,15 @@ from .runtime_client import DEFAULT_RUNTIME_SOCKET
 RUNTIME_PREFIX = "freebsd-lab-"
 RUNTIME_NAME_RE = re.compile(r"^freebsd-lab-[a-z0-9]{1,16}$")
 MAX_REQUEST_BYTES = 64 * 1024
+
+
+def _serialized_lifecycle(method: Any) -> Any:
+    @wraps(method)
+    def wrapped(self: "RuntimeManager", *args: Any, **kwargs: Any) -> Any:
+        with self._lifecycle_lock:
+            return method(self, *args, **kwargs)
+
+    return wrapped
 
 
 @dataclass(frozen=True)
@@ -76,6 +89,7 @@ class RuntimeManager:
 
     def __init__(self, config: RuntimeConfig) -> None:
         self.config = config
+        self._lifecycle_lock = threading.RLock()
         self.registry_dir = Path(config.registry_dir)
         self.registry_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
         self.pool = IPv4LeasePool(
@@ -101,6 +115,28 @@ class RuntimeManager:
         if isinstance(owner_pid, bool) or not isinstance(owner_pid, int) or owner_pid <= 1:
             raise ValueError("owner_pid must be a positive host process id")
         return owner_pid
+
+    @staticmethod
+    def validate_ssh_public_key(value: str) -> str:
+        if not isinstance(value, str) or not value or len(value) > 1024:
+            raise ValueError("Runtime SSH public key is invalid")
+        if "\n" in value or "\r" in value:
+            raise ValueError("Runtime SSH public key must be one line")
+        fields = value.strip().split(maxsplit=2)
+        if len(fields) < 2 or fields[0] != "ssh-ed25519":
+            raise ValueError("Runtime SSH public key must be Ed25519")
+        try:
+            blob = base64.b64decode(fields[1], validate=True)
+        except (binascii.Error, ValueError) as error:
+            raise ValueError("Runtime SSH public key has invalid base64") from error
+        if (
+            len(blob) != 51
+            or blob[:4] != (11).to_bytes(4, "big")
+            or blob[4:15] != b"ssh-ed25519"
+            or blob[15:19] != (32).to_bytes(4, "big")
+        ):
+            raise ValueError("Runtime SSH public key has invalid Ed25519 encoding")
+        return f"ssh-ed25519 {fields[1]}"
 
     @staticmethod
     def _run(
@@ -234,6 +270,25 @@ class RuntimeManager:
         finally:
             temporary.unlink(missing_ok=True)
 
+    def _write_runtime_public_key(self, name: str, public_key: str) -> Path:
+        descriptor, temporary_name = tempfile.mkstemp(
+            prefix=f".{name}.ssh-key.",
+            dir=self.registry_dir,
+            text=True,
+        )
+        temporary = Path(temporary_name)
+        try:
+            with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+                stream.write(public_key)
+                stream.write("\n")
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.chmod(temporary, 0o600, follow_symlinks=False)
+            return temporary
+        except Exception:
+            temporary.unlink(missing_ok=True)
+            raise
+
     def _delete_registry(self, name: str) -> None:
         self._registry_path(name).unlink(missing_ok=True)
 
@@ -331,10 +386,7 @@ class RuntimeManager:
             ["jexec", name, "ifconfig", "lo0", "inet", "127.0.0.1/8", "up"]
         )
 
-    def _install_jail_authorized_key(self, jail_root: str) -> None:
-        public_key = Path(self.config.ssh_public_key)
-        if public_key.is_symlink() or not public_key.is_file():
-            raise RuntimeError(f"Runtime SSH public key is unavailable: {public_key}")
+    def _install_jail_authorized_key(self, jail_root: str, public_key: str) -> None:
         user = self._run(
             [
                 "pw",
@@ -368,17 +420,20 @@ class RuntimeManager:
         authorized_keys = ssh_dir / "authorized_keys"
         if authorized_keys.is_symlink():
             authorized_keys.unlink()
-        authorized_keys.write_bytes(public_key.read_bytes())
+        authorized_keys.write_text(public_key + "\n", encoding="utf-8")
         os.chmod(authorized_keys, 0o600, follow_symlinks=False)
         os.chown(authorized_keys, uid, gid, follow_symlinks=False)
 
+    @_serialized_lifecycle
     def create_jail(
         self,
         name: str,
         owner_pid: int,
         peer: PeerCredentials,
+        ssh_public_key: str,
     ) -> dict[str, Any]:
         name = self.validate_name(name)
+        public_key = self.validate_ssh_public_key(ssh_public_key)
         owner = self._owner_from_peer(peer, owner_pid)
         self._reconcile_registered_before_create(name, owner)
 
@@ -416,7 +471,7 @@ class RuntimeManager:
             )
             record["dataset_created"] = True
             self._write_registry(record)
-            self._install_jail_authorized_key(jail_root)
+            self._install_jail_authorized_key(jail_root, public_key)
 
             epair_result = self._run(["ifconfig", "epair", "create"])
             epair_host = epair_result.stdout.strip().splitlines()[-1].strip()
@@ -491,19 +546,19 @@ class RuntimeManager:
             self.destroy(name, force=True)
             raise
 
+    @_serialized_lifecycle
     def create_bhyve(
         self,
         name: str,
         owner_pid: int,
         peer: PeerCredentials,
+        ssh_public_key: str,
     ) -> dict[str, Any]:
         name = self.validate_name(name)
+        public_key = self.validate_ssh_public_key(ssh_public_key)
         owner = self._owner_from_peer(peer, owner_pid)
         self._require_vm_backend()
         self._reconcile_registered_before_create(name, owner)
-        public_key = Path(self.config.ssh_public_key)
-        if public_key.is_symlink() or not public_key.is_file():
-            raise RuntimeError(f"Runtime SSH public key is unavailable: {self.config.ssh_public_key}")
 
         self._ensure_bridge()
         self._ensure_vm_switch()
@@ -521,8 +576,10 @@ class RuntimeManager:
             "vm_created": False,
         }
         self._write_registry(record)
+        temporary_public_key: Path | None = None
 
         try:
+            temporary_public_key = self._write_runtime_public_key(name, public_key)
             netconfig = ";".join(
                 [
                     f"interface={self.config.vm_interface}",
@@ -540,7 +597,7 @@ class RuntimeManager:
                     self.config.vm_image,
                     "-C",
                     "-k",
-                    self.config.ssh_public_key,
+                    str(temporary_public_key),
                     "-n",
                     netconfig,
                     name,
@@ -560,6 +617,9 @@ class RuntimeManager:
         except Exception:
             self.destroy(name, force=True)
             raise
+        finally:
+            if temporary_public_key is not None:
+                temporary_public_key.unlink(missing_ok=True)
 
     def _jail_exists(self, name: str) -> bool:
         return self._run(["jls", "-j", name, "name"], check=False).returncode == 0
@@ -575,6 +635,7 @@ class RuntimeManager:
     def _interface_exists(self, interface: str) -> bool:
         return self._run(["ifconfig", interface], check=False).returncode == 0
 
+    @_serialized_lifecycle
     def destroy(
         self,
         name: str,
@@ -701,6 +762,7 @@ class RuntimeManager:
             members.add(match.group(1))
         return members
 
+    @_serialized_lifecycle
     def gc(
         self,
         *,
@@ -721,15 +783,19 @@ class RuntimeManager:
         errors: dict[str, str] = {}
 
         for name, record in registered.items():
+            if requester_uid != 0 and record.get("owner_uid") != requester_uid:
+                retained.add(name)
+                continue
             alive = self._owner_alive(record)
             if stale_only and alive:
                 retained.add(name)
                 continue
-            if not stale_only and requester_uid != 0 and record.get("owner_uid") != requester_uid:
-                retained.add(name)
-                continue
             try:
-                self.destroy(name, force=True)
+                self.destroy(
+                    name,
+                    requester_uid=requester_uid,
+                    force=requester_uid == 0,
+                )
                 cleaned.append(name)
             except Exception as error:
                 retained.add(name)
@@ -762,7 +828,9 @@ class RuntimeManager:
             removed_epairs = []
 
         active_owners = set(self._registered())
-        released_addresses = self.pool.clear_orphans(active_owners)
+        released_addresses = (
+            self.pool.clear_orphans(active_owners) if requester_uid == 0 else []
+        )
         return {
             "cleaned": sorted(set(cleaned)),
             "retained": sorted(active_owners),
@@ -799,7 +867,7 @@ class RuntimeRequestHandler(socketserver.StreamRequestHandler):
     ) -> dict[str, Any]:
         action = request.get("action")
         if action == "ping":
-            return {"service": "freebsd-laboratory-runtime", "version": 2}
+            return {"service": "freebsd-laboratory-runtime", "version": 3}
         if action == "create-jail":
             name = request.get("name")
             if not isinstance(name, str):
@@ -807,10 +875,14 @@ class RuntimeRequestHandler(socketserver.StreamRequestHandler):
             owner_pid = request.get("owner_pid")
             if isinstance(owner_pid, bool) or not isinstance(owner_pid, int):
                 raise ValueError("owner_pid must be an integer process id")
+            ssh_public_key = request.get("ssh_public_key")
+            if not isinstance(ssh_public_key, str):
+                raise ValueError("ssh_public_key must be a string")
             return self.manager.create_jail(
                 name,
                 owner_pid,
                 peer,
+                ssh_public_key,
             )
         if action == "create-bhyve":
             name = request.get("name")
@@ -819,10 +891,14 @@ class RuntimeRequestHandler(socketserver.StreamRequestHandler):
             owner_pid = request.get("owner_pid")
             if isinstance(owner_pid, bool) or not isinstance(owner_pid, int):
                 raise ValueError("owner_pid must be an integer process id")
+            ssh_public_key = request.get("ssh_public_key")
+            if not isinstance(ssh_public_key, str):
+                raise ValueError("ssh_public_key must be a string")
             return self.manager.create_bhyve(
                 name,
                 owner_pid,
                 peer,
+                ssh_public_key,
             )
         if action == "destroy":
             name = request.get("name")

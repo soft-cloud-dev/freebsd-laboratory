@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import base64
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
@@ -83,12 +87,34 @@ def owner_record(
     return record
 
 
+def ed25519_public_key() -> str:
+    algorithm = b"ssh-ed25519"
+    key = b"\x42" * 32
+    blob = (
+        len(algorithm).to_bytes(4, "big")
+        + algorithm
+        + len(key).to_bytes(4, "big")
+        + key
+    )
+    return "ssh-ed25519 " + base64.b64encode(blob).decode("ascii")
+
+
 def test_runtime_names_are_strictly_constrained() -> None:
     assert RuntimeManager.validate_name("freebsd-lab-abc123") == "freebsd-lab-abc123"
     with pytest.raises(ValueError):
         RuntimeManager.validate_name("../../etc/passwd")
     with pytest.raises(ValueError):
         RuntimeManager.validate_name("other-runtime")
+
+
+def test_runtime_public_key_accepts_only_ed25519_material() -> None:
+    key = ed25519_public_key()
+
+    assert RuntimeManager.validate_ssh_public_key(key + " user@host") == key
+    with pytest.raises(ValueError, match="Ed25519"):
+        RuntimeManager.validate_ssh_public_key("ssh-rsa AAAA")
+    with pytest.raises(ValueError, match="one line"):
+        RuntimeManager.validate_ssh_public_key(key + "\ncommand=evil")
 
 
 def test_create_owner_is_bound_to_authenticated_peer(
@@ -162,6 +188,25 @@ def test_gc_uses_process_fingerprint_not_bare_pid(
     assert reused in manager.destroyed
 
 
+def test_stale_gc_is_scoped_to_requester_uid(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manager = make_manager(tmp_path)
+    own = "freebsd-lab-own"
+    other = "freebsd-lab-other"
+    manager._write_registry(owner_record(own, uid=1000, pid=100, digest="a" * 64))
+    manager._write_registry(owner_record(other, uid=1001, pid=101, digest="b" * 64))
+    monkeypatch.setattr(runtime_daemon, "process_matches", lambda pid, uid, digest: False)
+
+    result = manager.gc(stale_only=True, requester_uid=1000)
+
+    assert own in result["cleaned"]
+    assert other in result["retained"]
+    assert manager._load_registry(other) is not None
+    assert other not in manager.destroyed
+
+
 def test_non_stale_gc_is_scoped_to_requester_uid(tmp_path: Path) -> None:
     manager = make_manager(tmp_path)
     own = "freebsd-lab-own"
@@ -174,6 +219,40 @@ def test_non_stale_gc_is_scoped_to_requester_uid(tmp_path: Path) -> None:
     assert own in result["cleaned"]
     assert other in result["retained"]
     assert manager._load_registry(other) is not None
+
+
+def test_lifecycle_gc_calls_are_serialized(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manager = make_manager(tmp_path)
+    first_entered = threading.Event()
+    release_first = threading.Event()
+    calls = 0
+    calls_lock = threading.Lock()
+
+    def registered() -> dict[str, dict[str, object]]:
+        nonlocal calls
+        with calls_lock:
+            calls += 1
+            current = calls
+        if current == 1:
+            first_entered.set()
+            release_first.wait(timeout=2)
+        return {}
+
+    monkeypatch.setattr(manager, "_registered", registered)
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        first = executor.submit(manager.gc, stale_only=True, requester_uid=1000)
+        assert first_entered.wait(timeout=1)
+        second = executor.submit(manager.gc, stale_only=True, requester_uid=1000)
+        time.sleep(0.05)
+        with calls_lock:
+            assert calls == 1
+        release_first.set()
+        first.result(timeout=2)
+        second.result(timeout=2)
 
 
 def test_jail_only_daemon_tolerates_missing_vm_bhyve(tmp_path: Path) -> None:

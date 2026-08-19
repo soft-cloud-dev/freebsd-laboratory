@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 import os
@@ -42,6 +43,18 @@ def make_manager(tmp_path: Path) -> RuntimeManager:
             ssh_public_key=str(tmp_path / "id_ed25519.pub"),
         )
     )
+
+
+def valid_ed25519_public_key() -> str:
+    algorithm = b"ssh-ed25519"
+    key = b"\x42" * 32
+    blob = (
+        len(algorithm).to_bytes(4, "big")
+        + algorithm
+        + len(key).to_bytes(4, "big")
+        + key
+    )
+    return "ssh-ed25519 " + base64.b64encode(blob).decode("ascii")
 
 
 # --- Telemetry Hardening Tests ---
@@ -111,8 +124,7 @@ def test_authorize_record_rejects_bool_and_invalid_requester_uids() -> None:
 
 def test_install_jail_authorized_key_prevents_symlink_attacks(tmp_path: Path) -> None:
     manager = make_manager(tmp_path)
-    pubkey = tmp_path / "id_ed25519.pub"
-    pubkey.write_text("ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAA test@lab\n", encoding="utf-8")
+    public_key = valid_ed25519_public_key()
 
     jail_root = tmp_path / "jail"
     user_home = jail_root / "home" / "freebsd"
@@ -129,10 +141,10 @@ def test_install_jail_authorized_key_prevents_symlink_attacks(tmp_path: Path) ->
 
     with patch("os.chown", side_effect=mock_chown):
         # Test normal key installation
-        manager._install_jail_authorized_key(str(jail_root))
+        manager._install_jail_authorized_key(str(jail_root), public_key)
         auth_keys = user_home / ".ssh" / "authorized_keys"
         assert auth_keys.is_file()
-        assert auth_keys.read_text(encoding="utf-8") == pubkey.read_text(encoding="utf-8")
+        assert auth_keys.read_text(encoding="utf-8") == public_key + "\n"
         assert auth_keys.stat().st_mode & 0o777 == 0o600
         assert all(call["follow_symlinks"] is False for call in chown_calls)
 
@@ -142,7 +154,7 @@ def test_install_jail_authorized_key_prevents_symlink_attacks(tmp_path: Path) ->
         auth_keys.unlink()
         auth_keys.symlink_to(victim_file)
 
-        manager._install_jail_authorized_key(str(jail_root))
+        manager._install_jail_authorized_key(str(jail_root), public_key)
         assert not auth_keys.is_symlink()
         assert auth_keys.is_file()
         assert victim_file.read_text(encoding="utf-8") == "critical host data"
@@ -150,8 +162,7 @@ def test_install_jail_authorized_key_prevents_symlink_attacks(tmp_path: Path) ->
 
 def test_install_jail_authorized_key_rejects_escaping_home(tmp_path: Path) -> None:
     manager = make_manager(tmp_path)
-    pubkey = tmp_path / "id_ed25519.pub"
-    pubkey.write_text("ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAA test@lab\n", encoding="utf-8")
+    public_key = valid_ed25519_public_key()
 
     jail_root = tmp_path / "jail"
     jail_root.mkdir(parents=True)
@@ -161,7 +172,7 @@ def test_install_jail_authorized_key_rejects_escaping_home(tmp_path: Path) -> No
     manager._run = lambda cmd, **kwargs: subprocess.CompletedProcess(cmd, 0, pw_output, "")  # type: ignore[method-assign]
 
     with pytest.raises(RuntimeError, match="escapes the jail root"):
-        manager._install_jail_authorized_key(str(jail_root))
+        manager._install_jail_authorized_key(str(jail_root), public_key)
 
 
 def test_destroy_does_not_destroy_arbitrary_interfaces(tmp_path: Path) -> None:
@@ -805,22 +816,10 @@ def test_runtime_daemon_gc_and_socket_hardening(tmp_path: Path) -> None:
     with pytest.raises(RuntimeError, match="Refusing to replace non-socket path"):
         _prepare_socket_path(regular_file)
 
-    # 4. _install_jail_authorized_key with symlinked ssh_public_key
-    sym_pubkey = tmp_path / "sym_id_ed25519.pub"
-    sym_pubkey.symlink_to(target_file)
-    manager_symkey = RuntimeManager(
-        RuntimeConfig(
-            registry_dir=str(tmp_path / "registry"),
-            lease_dir=str(tmp_path / "leases"),
-            network_cidr="172.31.254.0/24",
-            host_address="172.31.254.1",
-            address_start="172.31.254.10",
-            address_end="172.31.254.20",
-            ssh_public_key=str(sym_pubkey),
-        )
-    )
-    with pytest.raises(RuntimeError, match="Runtime SSH public key is unavailable"):
-        manager_symkey._install_jail_authorized_key(str(tmp_path / "jail"))
+    # 4. Public-key material must be a single validated Ed25519 line.
+    public_key = valid_ed25519_public_key()
+    with pytest.raises(ValueError, match="one line"):
+        RuntimeManager.validate_ssh_public_key(public_key + "\ncommand=evil")
 
 
 def test_remote_provisioner_hardening(tmp_path: Path) -> None:
@@ -1162,14 +1161,8 @@ notebook: Test.ipynb
         assert filepath.stat().st_mode & 0o777 == 0o600
 
 
-def test_runtime_daemon_create_bhyve_rejects_symlinked_ssh_key(tmp_path: Path) -> None:
+def test_runtime_daemon_create_bhyve_rejects_malformed_ssh_key(tmp_path: Path) -> None:
     from freebsd_laboratory.peer_credentials import PeerCredentials
-
-    target_file = tmp_path / "target_key.pub"
-    target_file.write_text("ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAA test\n", encoding="utf-8")
-
-    sym_pubkey = tmp_path / "sym_id_ed25519.pub"
-    sym_pubkey.symlink_to(target_file)
 
     manager = RuntimeManager(
         RuntimeConfig(
@@ -1179,14 +1172,18 @@ def test_runtime_daemon_create_bhyve_rejects_symlinked_ssh_key(tmp_path: Path) -
             host_address="172.31.254.1",
             address_start="172.31.254.10",
             address_end="172.31.254.20",
-            ssh_public_key=str(sym_pubkey),
             vm_command="/bin/sh",
         )
     )
     peer = PeerCredentials(pid=os.getpid(), uid=os.getuid(), gid=os.getgid())
 
-    with pytest.raises(RuntimeError, match="Runtime SSH public key is unavailable"):
-        manager.create_bhyve("freebsd-lab-testvm", os.getpid(), peer)
+    with pytest.raises(ValueError, match="Ed25519"):
+        manager.create_bhyve(
+            "freebsd-lab-testvm",
+            os.getpid(),
+            peer,
+            "ssh-rsa AAAA",
+        )
 
 
 def test_ssh_transport_stage_symlink_and_remote_dir_guards(tmp_path: Path) -> None:
@@ -1337,4 +1334,3 @@ def test_verify_bundle_rejects_symlinked_or_nonexistent_bundle_dir(tmp_path: Pat
 
     with pytest.raises(ValueError, match="Evidence bundle must not be a symbolic link"):
         verify_bundle(sym_bundle)
-
