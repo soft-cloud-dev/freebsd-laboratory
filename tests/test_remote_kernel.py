@@ -131,8 +131,6 @@ def test_port_pool_prevents_concurrent_session_collisions(tmp_path: Path) -> Non
     assert len(all_ports) == session_count * ports_per_session
     assert len(set(all_ports)) == len(all_ports)
 
-    # Simulate the launch handoff: pre-bound sockets are closed immediately before
-    # OpenSSH binds, while PID-bearing lease filenames remain authoritative.
     for reservation in reservations:
         reservation.release_reservations()
 
@@ -212,6 +210,40 @@ def test_ssh_transport_forwards_all_kernel_ports_with_keepalives(tmp_path: Path)
     for port in PORTS.values():
         assert f"127.0.0.1:{port}:127.0.0.1:{port}" in command
     assert "172.31.254.10" in rendered
+
+
+def test_ssh_transport_accepts_default_device_config(tmp_path: Path) -> None:
+    private_key = tmp_path / "id_ed25519"
+    private_key.write_text("test", encoding="utf-8")
+    transport = SSHTransport(
+        host="172.31.254.10",
+        user="freebsd",
+        private_key=str(private_key),
+        known_hosts_file=tmp_path / "known_hosts",
+        ssh_command="/bin/sh",
+        scp_command="/bin/sh",
+    )
+
+    transport.assert_available()
+
+
+def test_ssh_transport_rejects_directory_as_config(tmp_path: Path) -> None:
+    private_key = tmp_path / "id_ed25519"
+    private_key.write_text("test", encoding="utf-8")
+    config_dir = tmp_path / "ssh-config"
+    config_dir.mkdir()
+    transport = SSHTransport(
+        host="172.31.254.10",
+        user="freebsd",
+        private_key=str(private_key),
+        known_hosts_file=tmp_path / "known_hosts",
+        ssh_command="/bin/sh",
+        scp_command="/bin/sh",
+        config_file=str(config_dir),
+    )
+
+    with pytest.raises(RuntimeError, match="configuration path is unavailable"):
+        transport.assert_available()
 
 
 def test_ssh_transport_rejects_invalid_forward_port(tmp_path: Path) -> None:

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import shlex
 import shutil
 import subprocess
@@ -37,7 +38,12 @@ class SSHTransport:
                 raise RuntimeError(f"Required executable is unavailable: {command}")
         if not Path(self.private_key).is_file():
             raise RuntimeError(f"Required SSH private key is unavailable: {self.private_key}")
-        if not Path(self.config_file).is_file():
+        config_path = Path(self.config_file)
+        if (
+            not config_path.exists()
+            or config_path.is_dir()
+            or not os.access(config_path, os.R_OK)
+        ):
             raise RuntimeError(
                 f"SSH client configuration path is unavailable: {self.config_file}"
             )
