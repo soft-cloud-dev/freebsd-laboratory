@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from traitlets import Int
+
 from .remote_provisioner import RemoteRuntimeProvisioner
 
 
@@ -15,6 +17,7 @@ class FreeBSDBhyveProvisioner(RemoteRuntimeProvisioner):
 
     runtime_label = "bhyve VM"
     provisioner_name_key = "vm_name"
+    startup_timeout: int = Int(90, min=5).tag(config=True)
 
     @property
     def vm_name(self) -> str | None:
