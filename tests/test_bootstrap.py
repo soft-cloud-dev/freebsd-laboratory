@@ -74,7 +74,8 @@ def test_labextension_build_produces_prebuilt_bundle() -> None:
     package = json.loads(LABEXTENSION_PACKAGE.read_text(encoding="utf-8"))
     assert package["scripts"]["build:labextension"] == "jupyter-builder build ."
     assert package["jupyterlab"]["outputDir"] == "labextension"
-    assert "@jupyter/builder" in package["devDependencies"]
+    assert "@jupyterlab/builder" in package["devDependencies"]
+    assert "@jupyter/builder" not in package["devDependencies"]
 
 
 def test_bootstrap_prepares_user_owned_jupyter_paths() -> None:
