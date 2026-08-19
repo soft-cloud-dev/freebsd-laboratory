@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import os
 from pathlib import Path
 from typing import Any
 
@@ -37,6 +38,8 @@ def _public_pem(public_key: Any) -> bytes:
 
 
 def load_private_key(path: Path) -> Any:
+    if path.is_symlink() or not path.is_file():
+        raise ValueError("Evidence signing key must be a regular file")
     serialization, Ed25519PrivateKey, _ = _cryptography()
     key = serialization.load_pem_private_key(path.read_bytes(), password=None)
     if not isinstance(key, Ed25519PrivateKey):
@@ -45,6 +48,8 @@ def load_private_key(path: Path) -> Any:
 
 
 def load_public_key(path: Path) -> Any:
+    if path.is_symlink() or not path.is_file():
+        raise ValueError("Evidence verification key must be a regular file")
     serialization, _, Ed25519PublicKey = _cryptography()
     key = serialization.load_pem_public_key(path.read_bytes())
     if not isinstance(key, Ed25519PublicKey):
@@ -53,6 +58,10 @@ def load_public_key(path: Path) -> Any:
 
 
 def sign_manifest(manifest_path: Path, private_key_path: Path, key_id: str) -> Path:
+    if manifest_path.is_symlink() or not manifest_path.is_file():
+        raise ValueError("Manifest path must be a regular file")
+    if not isinstance(key_id, str) or not key_id:
+        raise ValueError("key_id must be a non-empty string")
     private_key = load_private_key(private_key_path)
     manifest_bytes = manifest_path.read_bytes()
     signature = private_key.sign(manifest_bytes)
@@ -68,11 +77,17 @@ def sign_manifest(manifest_path: Path, private_key_path: Path, key_id: str) -> P
         "signature_base64": base64.b64encode(signature).decode("ascii"),
     }
     signature_path = manifest_path.with_name("manifest.sig.json")
-    signature_path.write_text(
+    if signature_path.is_symlink():
+        signature_path.unlink()
+    temporary = signature_path.with_name(f".{signature_path.name}.tmp")
+    if temporary.is_symlink():
+        temporary.unlink()
+    temporary.write_text(
         json.dumps(document, sort_keys=True, separators=(",", ":"), ensure_ascii=False) + "\n",
         encoding="utf-8",
     )
-    signature_path.chmod(0o600)
+    os.chmod(temporary, 0o600, follow_symlinks=False)
+    temporary.replace(signature_path)
     return signature_path
 
 
@@ -81,8 +96,17 @@ def verify_manifest_signature(
     signature_path: Path,
     trusted_public_key: Path | None = None,
 ) -> dict[str, Any]:
+    if manifest_path.is_symlink() or not manifest_path.is_file():
+        raise ValueError("Manifest path must be a regular file")
+    if signature_path.is_symlink() or not signature_path.is_file():
+        raise ValueError("Signature path must be a regular file")
     _, _, Ed25519PublicKey = _cryptography()
-    document = json.loads(signature_path.read_text(encoding="utf-8"))
+    try:
+        document = json.loads(signature_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise ValueError(f"Invalid signature JSON: {error}") from error
+    if not isinstance(document, dict):
+        raise ValueError("Signature document must be an object")
     if document.get("schema") != SIGNATURE_SCHEMA or document.get("algorithm") != "ed25519":
         raise ValueError("Unsupported evidence signature format")
 
@@ -100,7 +124,10 @@ def verify_manifest_signature(
         embedded = document.get("public_key_pem")
         if not isinstance(embedded, str):
             raise ValueError("Signature metadata does not contain a public key")
-        loaded = serialization.load_pem_public_key(embedded.encode("ascii"))
+        try:
+            loaded = serialization.load_pem_public_key(embedded.encode("ascii"))
+        except Exception as error:
+            raise ValueError(f"Invalid embedded public key: {error}") from error
         if not isinstance(loaded, Ed25519PublicKey):
             raise ValueError("Embedded signature key is not Ed25519")
         public_key = loaded
@@ -111,6 +138,12 @@ def verify_manifest_signature(
     signature_raw = document.get("signature_base64")
     if not isinstance(signature_raw, str):
         raise ValueError("Signature metadata does not contain a signature")
-    signature = base64.b64decode(signature_raw, validate=True)
-    public_key.verify(signature, manifest_bytes)
+    try:
+        signature = base64.b64decode(signature_raw, validate=True)
+    except Exception as error:
+        raise ValueError(f"Invalid base64 signature: {error}") from error
+    try:
+        public_key.verify(signature, manifest_bytes)
+    except Exception as error:
+        raise ValueError(f"Manifest signature verification failed: {error}") from error
     return document

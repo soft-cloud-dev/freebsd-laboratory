@@ -56,10 +56,14 @@ class PeerCredentials:
 def freebsd_peer_credentials(peer: socket.socket) -> PeerCredentials:
     """Return kernel-authenticated credentials for a connected FreeBSD Unix peer."""
 
+    if not isinstance(peer, socket.socket):
+        raise TypeError("peer must be a socket.socket instance")
     if platform.system() != "FreeBSD":
         raise RuntimeError("FreeBSD LOCAL_PEERCRED is unavailable on this platform")
     if peer.family != socket.AF_UNIX:
         raise RuntimeError("Runtime control peer is not a Unix-domain socket")
+    if peer.fileno() == -1:
+        raise RuntimeError("Socket is closed")
 
     libc = ctypes.CDLL(None, use_errno=True)
     getsockopt = libc.getsockopt
@@ -93,7 +97,7 @@ def freebsd_peer_credentials(peer: socket.socket) -> PeerCredentials:
         raise RuntimeError(
             f"Unsupported FreeBSD xucred version: {credentials.cr_version}"
         )
-    if credentials.cr_ngroups < 1:
+    if credentials.cr_ngroups < 1 or credentials.cr_ngroups > XU_NGROUPS:
         raise RuntimeError("FreeBSD peer credentials contain no effective group")
     if credentials.cr_pid <= 1:
         raise RuntimeError("FreeBSD peer credentials contain an invalid process id")

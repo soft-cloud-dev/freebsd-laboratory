@@ -14,11 +14,21 @@ def sha256_file(path: Path) -> str:
 
 
 def verify_bundle(bundle: Path, trusted_public_key: Path | None = None) -> dict[str, Any]:
-    bundle = bundle.resolve()
+    raw_bundle = Path(bundle)
+    if raw_bundle.is_symlink():
+        raise ValueError("Evidence bundle must not be a symbolic link")
+    bundle = raw_bundle.resolve()
+    if not bundle.is_dir():
+        raise ValueError("Evidence bundle directory does not exist")
     manifest_path = bundle / "manifest.json"
-    if not manifest_path.is_file():
+    if manifest_path.is_symlink() or not manifest_path.is_file():
         raise ValueError("manifest.json is missing")
-    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise ValueError(f"Invalid manifest.json: {error}") from error
+    if not isinstance(manifest, dict):
+        raise ValueError("manifest.json must be an object")
     if manifest.get("schema") != "softcloud.lab-evidence-manifest/v1":
         raise ValueError("Unsupported evidence manifest schema")
 
@@ -28,7 +38,7 @@ def verify_bundle(bundle: Path, trusted_public_key: Path | None = None) -> dict[
 
     verified_artifacts: list[str] = []
     for name, metadata in artifacts.items():
-        if not isinstance(name, str) or Path(name).name != name:
+        if not isinstance(name, str) or not name or name in {".", ".."} or Path(name).name != name:
             raise ValueError(f"Invalid artifact path in manifest: {name!r}")
         if not isinstance(metadata, dict):
             raise ValueError(f"Invalid artifact metadata for {name}")
@@ -36,19 +46,21 @@ def verify_bundle(bundle: Path, trusted_public_key: Path | None = None) -> dict[
         if not isinstance(expected, str):
             raise ValueError(f"Missing SHA-256 for {name}")
         path = bundle / name
-        if not path.is_file():
+        if path.is_symlink() or not path.is_file():
             raise ValueError(f"Evidence artifact is missing: {name}")
         actual = sha256_file(path)
         if actual != expected:
             raise ValueError(f"Evidence artifact hash mismatch: {name}")
         expected_size = metadata.get("size")
-        if isinstance(expected_size, int) and path.stat().st_size != expected_size:
+        if isinstance(expected_size, int) and not isinstance(expected_size, bool) and path.stat().st_size != expected_size:
             raise ValueError(f"Evidence artifact size mismatch: {name}")
         verified_artifacts.append(name)
 
     signature_path = bundle / "manifest.sig.json"
     signature: dict[str, Any] | None = None
-    if signature_path.is_file():
+    if signature_path.is_symlink():
+        raise ValueError("Evidence signature must not be a symbolic link")
+    elif signature_path.is_file():
         signature = verify_manifest_signature(
             manifest_path,
             signature_path,

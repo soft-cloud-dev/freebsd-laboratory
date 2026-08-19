@@ -1,0 +1,22 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Caches and virtual environments
+.venv/
+.wheel_cache/
+.pytest_cache/
+.ruff_cache/
+
+# Node / labextension build artifacts
+node_modules/
+labextension/labextension/
+labextension/lib/
+labextension/tsconfig.tsbuildinfo
+labextension/package-lock.json
+npm-debug.log*
+
+# Multi-agent and teamwork run logs
+.agents/
+ORIGINAL_REQUEST.md

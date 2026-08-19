@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import hashlib
 import os
+import shutil
 import subprocess
 from dataclasses import dataclass
 
 
-PS_COMMAND = "/bin/ps"
+PS_COMMAND = shutil.which("ps") or "/bin/ps"
 
 
 @dataclass(frozen=True)
@@ -68,5 +69,16 @@ def query_process_identity(pid: int) -> ProcessIdentity | None:
 
 
 def process_matches(pid: int, uid: int, digest: str) -> bool:
+    if (
+        isinstance(pid, bool)
+        or not isinstance(pid, int)
+        or pid <= 1
+        or isinstance(uid, bool)
+        or not isinstance(uid, int)
+        or uid < 0
+        or not isinstance(digest, str)
+        or not digest
+    ):
+        return False
     identity = query_process_identity(pid)
     return identity is not None and identity.uid == uid and identity.digest == digest

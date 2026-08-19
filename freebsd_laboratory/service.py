@@ -88,10 +88,10 @@ def redact_payload(value: Any) -> Any:
             )
             for key, item in value.items()
         }
-    if isinstance(value, list):
+    if isinstance(value, (list, tuple)):
         return [redact_payload(item) for item in value]
-    if isinstance(value, tuple):
-        return [redact_payload(item) for item in value]
+    if isinstance(value, (set, frozenset)):
+        return [redact_payload(item) for item in sorted(value, key=str)]
     return value
 
 
@@ -145,9 +145,13 @@ class LabService:
         max_event_payload_bytes: int = 1024 * 1024,
         fsync_events: bool = True,
     ) -> None:
-        if max_events < 1:
+        if not isinstance(max_events, int) or isinstance(max_events, bool) or max_events < 1:
             raise ValueError("max_events must be positive")
-        if max_event_payload_bytes < 1024:
+        if (
+            not isinstance(max_event_payload_bytes, int)
+            or isinstance(max_event_payload_bytes, bool)
+            or max_event_payload_bytes < 1024
+        ):
             raise ValueError("max_event_payload_bytes must be at least 1024")
 
         self.root_dir = root_dir.resolve()
@@ -171,14 +175,22 @@ class LabService:
         self.events_file.chmod(0o600)
 
     def _resolve_inside_root(self, value: str) -> Path:
-        path = (self.root_dir / value).resolve()
+        raw_path = self.root_dir / value
+        if raw_path.is_symlink():
+            raise ValueError(f"lab_path must not be a symbolic link: {value}")
+        path = raw_path.resolve()
         if path != self.root_dir and self.root_dir not in path.parents:
             raise ValueError(f"Path escapes Jupyter root: {value}")
         return path
 
     @staticmethod
     def _load_spec(path: Path) -> dict[str, Any]:
-        document = yaml.safe_load(path.read_text(encoding="utf-8"))
+        if path.is_symlink() or not path.is_file():
+            raise ValueError("lab.yaml must be a regular file")
+        try:
+            document = yaml.safe_load(path.read_text(encoding="utf-8"))
+        except (OSError, yaml.YAMLError) as error:
+            raise ValueError(f"Invalid lab.yaml: {error}") from error
         if not isinstance(document, dict):
             raise ValueError("lab.yaml must contain a mapping")
         if document.get("schema") != "softcloud.lab/v1":
@@ -220,6 +232,8 @@ class LabService:
         path = Path(key_path).expanduser()
         if not path.is_absolute():
             path = (self.root_dir / path).resolve()
+        if path.is_symlink() or not path.is_file():
+            raise ValueError(f"evidence.signing.private_key is unavailable: {path}")
         key_id = signing.get("key_id", path.name)
         if not isinstance(key_id, str) or not key_id:
             raise ValueError("evidence.signing.key_id must be a non-empty string")
@@ -231,12 +245,12 @@ class LabService:
         }
 
     def record_client_event(self, kind: str, payload: dict[str, Any]) -> EvidenceEvent:
-        if kind not in CLIENT_EVENT_KINDS:
+        if not isinstance(kind, str) or kind not in CLIENT_EVENT_KINDS:
             raise ValueError(f"Client event kind is not allowed: {kind}")
         return self._record(kind=kind, payload=payload, source="jupyterlab-observer")
 
     def record_machine_event(self, kind: str, payload: dict[str, Any]) -> EvidenceEvent:
-        if kind not in MACHINE_EVENT_KINDS:
+        if not isinstance(kind, str) or kind not in MACHINE_EVENT_KINDS:
             raise ValueError(f"Machine event kind is not allowed: {kind}")
         return self._record(kind=kind, payload=payload, source="laboratory-server")
 
@@ -278,6 +292,16 @@ class LabService:
             self._events.append(event)
             return event
 
+    @staticmethod
+    def _is_positive_int(value: Any) -> bool:
+        if isinstance(value, bool):
+            return False
+        if isinstance(value, int):
+            return value > 0
+        if isinstance(value, str) and value.isdigit():
+            return int(value) > 0
+        return False
+
     def _completed_stages(self) -> set[str]:
         completed: set[str] = set()
         kinds = {event.kind for event in self._events}
@@ -287,7 +311,7 @@ class LabService:
 
         if any(
             event.kind == "notebook-context"
-            and int(event.payload.get("markdown_cells", 0)) > 0
+            and self._is_positive_int(event.payload.get("markdown_cells", 0))
             for event in self._events
         ):
             completed.add("explained")
@@ -367,7 +391,9 @@ class LabService:
             sums_path = self.session_dir / "SHA256SUMS"
 
             evidence_path.write_bytes(canonical_json(evidence) + b"\n")
+            os.chmod(evidence_path, 0o600, follow_symlinks=False)
             environment_path.write_bytes(canonical_json(environment) + b"\n")
+            os.chmod(environment_path, 0o600, follow_symlinks=False)
 
             artifacts = {
                 path.name: {
@@ -391,6 +417,7 @@ class LabService:
                 },
             }
             manifest_path.write_bytes(canonical_json(manifest) + b"\n")
+            os.chmod(manifest_path, 0o600, follow_symlinks=False)
 
             signature_path: Path | None = None
             if signing["enabled"]:
@@ -413,6 +440,7 @@ class LabService:
                 for path in sorted(hashed_paths, key=lambda item: item.name)
             )
             sums_path.write_text(sums, encoding="utf-8")
+            os.chmod(sums_path, 0o600, follow_symlinks=False)
 
             return {
                 "session_id": self.session_id,

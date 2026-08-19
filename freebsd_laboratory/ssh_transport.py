@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import ipaddress
 import os
+import re
 import shlex
 import shutil
 import subprocess
@@ -33,21 +35,35 @@ class SSHTransport:
     bind_address: str = "127.0.0.1"
 
     def assert_available(self) -> None:
+        try:
+            ipaddress.ip_address(self.bind_address)
+        except ValueError as error:
+            raise ValueError(f"Invalid bind_address: {self.bind_address}") from error
+        if not isinstance(self.user, str) or not re.fullmatch(r"[a-z_][a-z0-9_-]*", self.user):
+            raise ValueError(f"Invalid SSH user: {self.user}")
+        try:
+            ipaddress.ip_address(self.host)
+        except ValueError:
+            if not isinstance(self.host, str) or not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9.-]*", self.host):
+                raise ValueError(f"Invalid host address: {self.host}")
         for command in (self.ssh_command, self.scp_command):
             if not executable_exists(command):
                 raise RuntimeError(f"Required executable is unavailable: {command}")
-        if not Path(self.private_key).is_file():
+        private_key_path = Path(self.private_key)
+        if private_key_path.is_symlink() or not private_key_path.is_file():
             raise RuntimeError(f"Required SSH private key is unavailable: {self.private_key}")
         if self.config_file != os.devnull:
             config_path = Path(self.config_file)
             if (
-                not config_path.exists()
-                or config_path.is_dir()
+                config_path.is_symlink()
+                or not config_path.is_file()
                 or not os.access(config_path, os.R_OK)
             ):
                 raise RuntimeError(
                     f"SSH client configuration path is unavailable: {self.config_file}"
                 )
+        if self.known_hosts_file is not None and Path(self.known_hosts_file).is_symlink():
+            raise RuntimeError(f"Known hosts file must not be a symbolic link: {self.known_hosts_file}")
 
     @property
     def target(self) -> str:
@@ -89,6 +105,8 @@ class SSHTransport:
         *,
         forward_ports: Sequence[int] = (),
     ) -> list[str]:
+        if isinstance(forward_ports, (str, bytes)):
+            raise ValueError("Invalid SSH forwarding port")
         command = [self.ssh_command, *self.options(), "-T"]
         for port in sorted(set(forward_ports)):
             if isinstance(port, bool) or not isinstance(port, int) or not 1 <= port <= 65535:
@@ -130,6 +148,8 @@ class SSHTransport:
         return result
 
     def wait_until_ready(self, timeout: int) -> None:
+        if isinstance(timeout, bool) or not isinstance(timeout, int) or timeout <= 0:
+            raise ValueError("timeout must be a positive integer")
         deadline = time.monotonic() + timeout
         last_detail = "SSH did not become ready"
         probe_timeout = max(5, self.connect_timeout + 2)
@@ -146,6 +166,12 @@ class SSHTransport:
         raise RuntimeError(f"Timed out waiting for {self.target} SSH: {last_detail}")
 
     def stage(self, host_path: Path, remote_dir: str) -> str:
+        if not host_path.exists():
+            raise RuntimeError(f"File to stage does not exist: {host_path}")
+        if host_path.is_symlink() or not host_path.is_file():
+            raise RuntimeError(f"File to stage must be a regular file: {host_path}")
+        if not isinstance(remote_dir, str) or not remote_dir.startswith("/"):
+            raise ValueError(f"remote_dir must be an absolute path: {remote_dir}")
         remote_path = f"{remote_dir.rstrip('/')}/{host_path.name}"
         self._run(
             self.command(f"install -d -m 700 {shlex.quote(remote_dir)}"),
