@@ -57,7 +57,6 @@ interface CellDocument {
 }
 
 const serverSettings = ServerConnection.makeSettings();
-const textEncoder = new TextEncoder();
 
 function endpoint(path: string): string {
   return URLExt.join(serverSettings.baseUrl, 'freebsd-lab', 'api', path);
@@ -99,21 +98,10 @@ function normalizedSource(document: CellDocument): string {
   return typeof document.source === 'string' ? document.source : '';
 }
 
-async function sha256(value: Uint8Array): Promise<string> {
-  const digest = await crypto.subtle.digest('SHA-256', value);
-  return Array.from(new Uint8Array(digest), byte =>
-    byte.toString(16).padStart(2, '0')
-  ).join('');
-}
-
-async function cellEvidence(
-  document: CellDocument
-): Promise<Record<string, unknown>> {
-  const sourceBytes = textEncoder.encode(normalizedSource(document));
+function cellEvidence(document: CellDocument): Record<string, unknown> {
   return {
     cell_type: document.cell_type ?? 'unknown',
-    source_sha256: await sha256(sourceBytes),
-    source_bytes: sourceBytes.byteLength,
+    source: normalizedSource(document),
     execution_count: document.execution_count ?? null,
     output_count: Array.isArray(document.outputs)
       ? document.outputs.length
@@ -358,18 +346,19 @@ const plugin: JupyterFrontEndPlugin<void> = {
       }
 
       const cellDocument = args.cell.model.toJSON() as CellDocument;
-      void (async () => {
-        const state = await postEvent('cell-executed', {
-          notebook: panel.context.path,
-          cell_id: args.cell.model.id,
-          success: args.success,
-          error_present: args.error !== null && args.error !== undefined,
-          cell: await cellEvidence(cellDocument)
+      void postEvent('cell-executed', {
+        notebook: panel.context.path,
+        cell_id: args.cell.model.id,
+        success: args.success,
+        error_present: args.error !== null && args.error !== undefined,
+        cell: cellEvidence(cellDocument)
+      })
+        .then(state => {
+          progression.setState(state);
+        })
+        .catch(error => {
+          console.error('FreeBSD Laboratory execution evidence failed', error);
         });
-        progression.setState(state);
-      })().catch(error => {
-        console.error('FreeBSD Laboratory execution evidence failed', error);
-      });
     });
 
     await progression.refresh();
