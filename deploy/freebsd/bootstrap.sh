@@ -34,6 +34,31 @@ install_python_entrypoint()
     chmod 0755 "$entrypoint_path"
 }
 
+wait_for_runtime_daemon()
+{
+    attempt=0
+    last_error="runtime daemon did not answer"
+    while [ "$attempt" -lt "$LAB_DAEMON_READY_TIMEOUT" ]; do
+        if output=$("$JUPYTER_VENV/bin/python" -c \
+            'from freebsd_laboratory.runtime_client import RuntimeClient; print(RuntimeClient(timeout=1.0).ping())' \
+            2>&1); then
+            printf '%s\n' "$output"
+            return 0
+        fi
+        last_error=$output
+        attempt=$((attempt + 1))
+        sleep 1
+    done
+
+    service freebsd_lab_daemon status >&2 || true
+    if [ -f /var/log/messages ]; then
+        tail -n 100 /var/log/messages \
+            | grep -E 'freebsd_lab_daemon|freebsd-lab-runtime-daemon|Traceback|RuntimeError' \
+            >&2 || true
+    fi
+    fail "Runtime daemon was not ready after ${LAB_DAEMON_READY_TIMEOUT}s: $last_error"
+}
+
 if [ "$(uname -s)" != "FreeBSD" ]; then
     fail "bootstrap.sh requires FreeBSD"
 fi
@@ -48,6 +73,8 @@ LAB_UPDATE_REPO=${LAB_UPDATE_REPO:-NO}
 LAB_JUPYTER_USER=${LAB_JUPYTER_USER:-}
 LAB_GROUP=${LAB_GROUP:-freebsdlab}
 LAB_DAEMON_VENV=${LAB_DAEMON_VENV:-/usr/local/libexec/freebsd-laboratory/daemon-venv}
+LAB_DAEMON_READY_TIMEOUT=${LAB_DAEMON_READY_TIMEOUT:-30}
+LAB_INSTALL_BHYVE_BACKEND=${LAB_INSTALL_BHYVE_BACKEND:-NO}
 LAB_JAIL_IMAGE_MODE=${LAB_JAIL_IMAGE_MODE:-release}
 LAB_SRC_DIR=${LAB_SRC_DIR:-/usr/src}
 LAB_SRC_BRANCH=${LAB_SRC_BRANCH:-}
@@ -58,6 +85,8 @@ LAB_RELEASE_TARGET_ARCH=${LAB_RELEASE_TARGET_ARCH:-}
 LAB_RELEASE_CACHE_DIR=${LAB_RELEASE_CACHE_DIR:-/var/cache/freebsd-laboratory/releases}
 LAB_BUILD_JAIL_IMAGE=${LAB_BUILD_JAIL_IMAGE:-YES}
 LAB_REBUILD_JAIL_IMAGE=${LAB_REBUILD_JAIL_IMAGE:-NO}
+LAB_FAIL_ON_PKG_AUDIT=${LAB_FAIL_ON_PKG_AUDIT:-YES}
+LAB_PKG_AUDIT_ALLOWED_VULN_IDS=${LAB_PKG_AUDIT_ALLOWED_VULN_IDS-}
 LAB_SMOKE_TEST=${LAB_SMOKE_TEST:-YES}
 LAB_ZFS_POOL=${LAB_ZFS_POOL:-}
 LAB_BRIDGE_CLONE=${LAB_BRIDGE_CLONE:-bridge0}
@@ -74,6 +103,9 @@ LAB_SSH_KEY=${LAB_SSH_KEY:-/usr/local/etc/freebsd-laboratory/id_ed25519}
 case "$LAB_JAIL_IMAGE_MODE" in
     release|source) ;;
     *) fail "LAB_JAIL_IMAGE_MODE must be release or source" ;;
+esac
+case "$LAB_DAEMON_READY_TIMEOUT" in
+    ''|*[!0-9]*|0) fail "LAB_DAEMON_READY_TIMEOUT must be a positive integer" ;;
 esac
 
 if [ -z "$LAB_JUPYTER_USER" ]; then
@@ -107,6 +139,9 @@ log "Bootstrapping package manager and base tools"
 env ASSUME_ALWAYS_YES=yes pkg bootstrap >/dev/null 2>&1 || true
 pkg update -f
 pkg install -y git python3 npm
+if is_yes "$LAB_INSTALL_BHYVE_BACKEND"; then
+    pkg install -y vm-bhyve
+fi
 
 PYTHON=/usr/local/bin/python3
 [ -x "$PYTHON" ] || fail "python3 was not installed at $PYTHON"
@@ -284,6 +319,8 @@ if is_yes "$LAB_BUILD_JAIL_IMAGE"; then
                     LAB_RELEASE_TARGET="$LAB_RELEASE_TARGET" \
                     LAB_RELEASE_TARGET_ARCH="$LAB_RELEASE_TARGET_ARCH" \
                     LAB_RELEASE_CACHE_DIR="$LAB_RELEASE_CACHE_DIR" \
+                    LAB_FAIL_ON_PKG_AUDIT="$LAB_FAIL_ON_PKG_AUDIT" \
+                    LAB_PKG_AUDIT_ALLOWED_VULN_IDS="$LAB_PKG_AUDIT_ALLOWED_VULN_IDS" \
                     JAIL_DATASET_PREFIX="$SNAPSHOT_PREFIX" \
                     JAIL_MOUNT_ROOT=/usr/local/jails/templates \
                     LAB_JAIL_PACKAGES="python3 ${PY_TAG}-ipykernel" \
@@ -329,6 +366,8 @@ if is_yes "$LAB_BUILD_JAIL_IMAGE"; then
                 env \
                     LAB_JAIL_IMAGE_MODE=source \
                     SRC_DIR="$LAB_SRC_DIR" \
+                    LAB_FAIL_ON_PKG_AUDIT="$LAB_FAIL_ON_PKG_AUDIT" \
+                    LAB_PKG_AUDIT_ALLOWED_VULN_IDS="$LAB_PKG_AUDIT_ALLOWED_VULN_IDS" \
                     JAIL_DATASET_PREFIX="$SNAPSHOT_PREFIX" \
                     JAIL_MOUNT_ROOT=/usr/local/jails/templates \
                     LAB_JAIL_PACKAGES="python3 ${PY_TAG}-ipykernel" \
@@ -445,8 +484,7 @@ if service freebsd_lab_daemon status >/dev/null 2>&1; then
 else
     service freebsd_lab_daemon start
 fi
-"$JUPYTER_VENV/bin/python" -c \
-    'from freebsd_laboratory.runtime_client import RuntimeClient; print(RuntimeClient().ping())'
+wait_for_runtime_daemon
 
 if is_yes "$LAB_SMOKE_TEST" && [ -n "$ACTIVE_SNAPSHOT" ]; then
     log "Running a real VNET jail smoke test"
