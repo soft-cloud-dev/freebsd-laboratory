@@ -179,3 +179,36 @@ def test_destroy_deletes_registry_after_dataset_is_observed_gone(
     assert manager._load_registry(name) is None
     assert state["dataset"] is False
     assert manager._jail_dataset(name) in result["removed"]
+
+
+def test_jail_loopback_is_configured_for_loopback_bound_kernel_ports(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manager = make_manager(tmp_path)
+    commands: list[list[str]] = []
+
+    def fake_run(
+        command: list[str],
+        *,
+        check: bool = True,
+        timeout: float | None = 60,
+    ) -> subprocess.CompletedProcess[str]:
+        commands.append(command)
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    monkeypatch.setattr(manager, "_run", fake_run)
+
+    manager._configure_jail_loopback("freebsd-lab-loopback")
+
+    assert commands == [
+        [
+            "jexec",
+            "freebsd-lab-loopback",
+            "ifconfig",
+            "lo0",
+            "inet",
+            "127.0.0.1/8",
+            "up",
+        ]
+    ]
