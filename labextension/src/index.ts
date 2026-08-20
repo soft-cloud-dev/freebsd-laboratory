@@ -411,6 +411,25 @@ const plugin: JupyterFrontEndPlugin<void> = {
     app.shell.add(progression, 'right', { rank: 900 });
     app.shell.add(statusBar, 'bottom', { rank: 0 });
 
+    const enforceReferenceShell = (): void => {
+      shell.mode = 'multiple-document';
+      shell.collapseDown();
+      shell.expandLeft();
+      shell.expandRight();
+      progression.show();
+      app.shell.activateById(progression.id);
+
+      for (const widget of shell.widgets('bottom')) {
+        if (widget !== statusBar) {
+          widget.hide();
+        }
+      }
+
+      void app.commands.execute('filebrowser:activate').catch(error => {
+        console.error('FreeBSD Laboratory file browser activation failed', error);
+      });
+    };
+
     app.commands.addCommand(EXPORT_COMMAND, {
       label: 'Export laboratory evidence',
       execute: async () => {
@@ -433,6 +452,7 @@ const plugin: JupyterFrontEndPlugin<void> = {
     app.commands.addCommand(SHOW_PROGRESS_COMMAND, {
       label: 'Show Lab progression',
       execute: () => {
+        shell.expandRight();
         progression.show();
         app.shell.activateById(progression.id);
       }
@@ -498,12 +518,7 @@ const plugin: JupyterFrontEndPlugin<void> = {
         tracker.forEach(panel => {
           void attachNotebook(panel);
         });
-        shell.mode = 'multiple-document';
-        void app.commands.execute('filebrowser:activate').catch(error => {
-          console.error('FreeBSD Laboratory file browser activation failed', error);
-        });
-        progression.show();
-        app.shell.activateById(progression.id);
+        enforceReferenceShell();
       })
       .catch(error => {
         console.error('FreeBSD Laboratory notebook restoration failed', error);
@@ -511,7 +526,7 @@ const plugin: JupyterFrontEndPlugin<void> = {
 
     void app.restored
       .then(() => {
-        shell.mode = 'multiple-document';
+        enforceReferenceShell();
       })
       .catch(error => {
         console.error('FreeBSD Laboratory shell restoration failed', error);
@@ -540,6 +555,8 @@ const plugin: JupyterFrontEndPlugin<void> = {
     });
 
     void progression.refresh();
+    shell.expandRight();
+    progression.show();
     app.shell.activateById(progression.id);
   }
 };
