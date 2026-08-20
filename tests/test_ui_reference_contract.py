@@ -29,6 +29,8 @@ def test_reference_geometry_and_brand_rails_are_preserved() -> None:
     assert "min-height: 80px" in style
     assert "width: 325px !important" in style
     assert "width: 270px !important" in style
+    assert '.jp-SideArea[data-side="left"]' in style
+    assert '.jp-SideArea[data-side="right"]' in style
     assert ".freebsdLab-IntroCard" in style
     assert ".freebsdLab-StatusBar" in style
     assert "--freebsd-lab-red: #b31b21" in style
