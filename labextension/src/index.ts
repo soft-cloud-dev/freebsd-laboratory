@@ -2,6 +2,7 @@ import {
   JupyterFrontEnd,
   JupyterFrontEndPlugin
 } from '@jupyterlab/application';
+import type { ILabShell } from '@jupyterlab/application';
 import { ICommandPalette, ToolbarButton } from '@jupyterlab/apputils';
 import { URLExt } from '@jupyterlab/coreutils';
 import {
@@ -14,6 +15,7 @@ import { Widget } from '@lumino/widgets';
 
 const PLUGIN_ID = '@softcloud/freebsd-laboratory:plugin';
 const EXPORT_COMMAND = 'freebsd-laboratory:export-evidence';
+const SHOW_PROGRESS_COMMAND = 'freebsd-laboratory:show-progression';
 const JSON_HEADERS = { 'Content-Type': 'application/json' };
 
 interface StageState {
@@ -124,12 +126,116 @@ function element<K extends keyof HTMLElementTagNameMap>(
   return node;
 }
 
+class Masthead extends Widget {
+  constructor() {
+    super();
+    this.id = 'freebsd-laboratory-masthead';
+    this.addClass('freebsdLab-Masthead');
+    this.node.setAttribute('role', 'banner');
+    this.node.setAttribute('aria-label', 'FreeBSD Laboratory');
+    this.render();
+  }
+
+  private render(): void {
+    const left = element('div', 'freebsdLab-MastheadBrand');
+    const mark = element('span', 'freebsdLab-BrandMark');
+    mark.setAttribute('aria-hidden', 'true');
+    mark.innerHTML = [
+      '<svg viewBox="0 0 56 56" focusable="false" aria-hidden="true">',
+      '<path d="M12 12 2 2l3 17z" fill="#b31b21"/>',
+      '<path d="M44 12 54 2l-3 17z" fill="#b31b21"/>',
+      '<circle cx="28" cy="29" r="22" fill="#b31b21"/>',
+      '<path d="M14 18c6-8 18-10 27-3" fill="none" stroke="#df5b5f" stroke-width="3" stroke-linecap="round" opacity=".72"/>',
+      '</svg>'
+    ].join('');
+
+    left.append(
+      mark,
+      element('span', 'freebsdLab-Wordmark', 'FreeBSD.'),
+      element('span', 'freebsdLab-BrandDivider'),
+      element('span', 'freebsdLab-Tagline', 'The Power To Serve')
+    );
+
+    const right = element('div', 'freebsdLab-MastheadJupyter');
+    right.append(
+      element('div', 'freebsdLab-MastheadTitle', 'JupyterLab'),
+      element(
+        'div',
+        'freebsdLab-MastheadSubtitle',
+        'FreeBSD executable documentation'
+      )
+    );
+
+    this.node.append(left, right);
+  }
+}
+
+class LaboratoryStatusBar extends Widget {
+  private runtime = 'FreeBSD laboratory';
+  private notebook = 'Intro.ipynb';
+
+  constructor() {
+    super();
+    this.id = 'freebsd-laboratory-status';
+    this.addClass('freebsdLab-StatusBar');
+    this.node.setAttribute('role', 'status');
+    this.render();
+  }
+
+  setState(state: LaboratoryState): void {
+    this.runtime = state.runtime.is_freebsd
+      ? `${state.runtime.system} ${state.runtime.release}`
+      : `${state.runtime.system} ${state.runtime.release}`.trim();
+    this.render();
+  }
+
+  setNotebook(path: string): void {
+    this.notebook = path.split('/').filter(Boolean).pop() ?? path;
+    this.render();
+  }
+
+  private render(): void {
+    this.node.replaceChildren();
+
+    const left = element('div', 'freebsdLab-StatusLeft');
+    const simple = element('span', 'freebsdLab-StatusSimple', 'Simple');
+    const toggle = element('span', 'freebsdLab-StatusToggle');
+    toggle.setAttribute('aria-hidden', 'true');
+    toggle.appendChild(element('span', 'freebsdLab-StatusToggleKnob'));
+    left.append(
+      simple,
+      toggle,
+      element('span', 'freebsdLab-StatusMetric', '⊙ 0'),
+      element('span', 'freebsdLab-StatusMetric', '$_ 0'),
+      element('span', 'freebsdLab-StatusMetric', '◉'),
+      element('span', 'freebsdLab-StatusRuntime', this.runtime)
+    );
+
+    const center = element('div', 'freebsdLab-StatusBrand');
+    center.append(
+      element('span', 'freebsdLab-StatusBrandMark', '◈'),
+      element('strong', 'freebsdLab-StatusBrandName', 'FreeBSD'),
+      element('span', 'freebsdLab-StatusBrandTagline', 'The Power To Serve')
+    );
+
+    const right = element('div', 'freebsdLab-StatusRight');
+    right.append(
+      element('span', 'freebsdLab-StatusMode', 'Mode: Command'),
+      element('span', 'freebsdLab-StatusPosition', 'Ln 1, Col 1'),
+      element('span', 'freebsdLab-StatusNotebook', this.notebook),
+      element('span', 'freebsdLab-StatusBell', '○')
+    );
+
+    this.node.append(left, center, right);
+  }
+}
+
 class ProgressionPanel extends Widget {
   private state: LaboratoryState | null = null;
   private notice = '';
   private error = '';
 
-  constructor() {
+  constructor(private readonly onState: (state: LaboratoryState) => void) {
     super();
     this.id = 'freebsd-laboratory-progression';
     this.title.label = 'Lab progression';
@@ -142,6 +248,7 @@ class ProgressionPanel extends Widget {
     try {
       this.state = await requestJson<LaboratoryState>('state');
       this.error = '';
+      this.onState(this.state);
     } catch (error) {
       this.error = error instanceof Error ? error.message : String(error);
     }
@@ -151,6 +258,7 @@ class ProgressionPanel extends Widget {
   setState(state: LaboratoryState): void {
     this.state = state;
     this.error = '';
+    this.onState(state);
     this.render();
   }
 
@@ -161,6 +269,19 @@ class ProgressionPanel extends Widget {
 
   private render(): void {
     this.node.replaceChildren();
+
+    const header = element('div', 'freebsdLab-ProgressHeader');
+    const headerTitle = element('div', 'freebsdLab-ProgressHeaderTitle');
+    headerTitle.append(
+      element('span', 'freebsdLab-ProgressHeaderMark', '◇'),
+      element('span', undefined, 'Lab progression')
+    );
+    const close = element('button', 'freebsdLab-ProgressClose', '×');
+    close.type = 'button';
+    close.setAttribute('aria-label', 'Close Lab progression');
+    close.addEventListener('click', () => this.hide());
+    header.append(headerTitle, close);
+    this.node.appendChild(header);
 
     if (this.error) {
       this.node.appendChild(element('div', 'freebsdLab-Error', this.error));
@@ -278,9 +399,17 @@ const plugin: JupyterFrontEndPlugin<void> = {
     tracker: INotebookTracker,
     palette: ICommandPalette | null
   ): void => {
-    const progression = new ProgressionPanel();
+    const shell = app.shell as ILabShell;
+    const statusBar = new LaboratoryStatusBar();
+    const progression = new ProgressionPanel(state => statusBar.setState(state));
+    const masthead = new Masthead();
     const attachedNotebooks = new WeakSet<NotebookPanel>();
+
+    document.body.classList.add('freebsdLab-ReferenceShell');
+    shell.mode = 'multiple-document';
+    app.shell.add(masthead, 'header', { rank: 0 });
     app.shell.add(progression, 'right', { rank: 900 });
+    app.shell.add(statusBar, 'bottom', { rank: 0 });
 
     app.commands.addCommand(EXPORT_COMMAND, {
       label: 'Export laboratory evidence',
@@ -301,7 +430,19 @@ const plugin: JupyterFrontEndPlugin<void> = {
       }
     });
 
+    app.commands.addCommand(SHOW_PROGRESS_COMMAND, {
+      label: 'Show Lab progression',
+      execute: () => {
+        progression.show();
+        app.shell.activateById(progression.id);
+      }
+    });
+
     palette?.addItem({ command: EXPORT_COMMAND, category: 'FreeBSD Laboratory' });
+    palette?.addItem({
+      command: SHOW_PROGRESS_COMMAND,
+      category: 'FreeBSD Laboratory'
+    });
 
     const attachNotebook = async (panel: NotebookPanel): Promise<void> => {
       if (attachedNotebooks.has(panel)) {
@@ -311,9 +452,27 @@ const plugin: JupyterFrontEndPlugin<void> = {
 
       await panel.revealed;
       await panel.context.ready;
+      panel.addClass('freebsdLab-NotebookPanel');
+
+      const pathBar = new Widget();
+      pathBar.addClass('freebsdLab-NotebookPath');
+      const updatePath = (path: string): void => {
+        pathBar.node.textContent = path.startsWith('/') ? path : `/${path}`;
+        statusBar.setNotebook(path);
+      };
+      updatePath(panel.context.path);
+      panel.context.pathChanged.connect((_sender, path) => updatePath(path));
+      panel.contentHeader.addWidget(pathBar);
+
+      if (
+        panel.context.path.endsWith('Intro.ipynb') &&
+        panel.content.widgets.length > 0
+      ) {
+        panel.content.widgets[0].addClass('freebsdLab-IntroCell');
+      }
 
       const exportButton = new ToolbarButton({
-        label: 'Export evidence',
+        label: '⇩ Export evidence',
         tooltip: 'Export the server-owned evidence bundle',
         onClick: () => {
           void app.commands.execute(EXPORT_COMMAND);
@@ -339,9 +498,23 @@ const plugin: JupyterFrontEndPlugin<void> = {
         tracker.forEach(panel => {
           void attachNotebook(panel);
         });
+        shell.mode = 'multiple-document';
+        void app.commands.execute('filebrowser:activate').catch(error => {
+          console.error('FreeBSD Laboratory file browser activation failed', error);
+        });
+        progression.show();
+        app.shell.activateById(progression.id);
       })
       .catch(error => {
         console.error('FreeBSD Laboratory notebook restoration failed', error);
+      });
+
+    void app.restored
+      .then(() => {
+        shell.mode = 'multiple-document';
+      })
+      .catch(error => {
+        console.error('FreeBSD Laboratory shell restoration failed', error);
       });
 
     NotebookActions.executed.connect((_sender, args) => {
