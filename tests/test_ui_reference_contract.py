@@ -20,6 +20,13 @@ def test_reference_shell_composition_is_preserved() -> None:
     assert "app.shell.add(masthead, 'header', { rank: 0 });" in source
     assert "app.shell.add(statusBar, 'bottom', { rank: 0 });" in source
     assert "app.commands.execute('filebrowser:activate')" in source
+    assert "const enforceReferenceShell = (): void => {" in source
+    assert "shell.collapseDown();" in source
+    assert "shell.expandLeft();" in source
+    assert "shell.expandRight();" in source
+    assert "for (const widget of shell.widgets('bottom'))" in source
+    assert "if (widget !== statusBar)" in source
+    assert "enforceReferenceShell();" in source
     assert "panel.contentHeader.addWidget(pathBar);" in source
     assert "label: '⇩ Export evidence'" in source
 
