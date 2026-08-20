@@ -1,24 +1,130 @@
+/* ========================================================================== */
+/* FreeBSD Laboratory Design Token System & Interface Stylesheet              */
+/* ========================================================================== */
+
+/* -------------------------------------------------------------------------- */
+/* Section 1: Design Tokens & System Variables                                */
+/* -------------------------------------------------------------------------- */
+
+:root,
 body.freebsdLab-ReferenceShell {
+  /* 1. Core Brand & Primitive Palette */
   --freebsd-lab-red: #b31b21;
   --freebsd-lab-red-dark: #970d14;
+  --freebsd-lab-red-hover: #c3151d;
   --freebsd-lab-red-soft: #fff3f3;
+  --freebsd-lab-red-soft-dark: #2a1114;
+  --freebsd-lab-red-border: #d48286;
+  --freebsd-lab-red-accent: #df5b5f;
   --freebsd-lab-blue: #1479c9;
-  --freebsd-lab-border: #d8d8d8;
-  --freebsd-lab-muted: #666;
+  --freebsd-lab-blue-dark: #1062a3;
+  --freebsd-lab-blue-soft: #edf5fc;
   --freebsd-lab-black: #050505;
+  --freebsd-lab-white: #ffffff;
   --freebsd-lab-status: #a70b12;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
+
+  /* 2. Semantic Surfaces with JupyterLab Theme Fallbacks */
+  --freebsd-lab-surface-primary: var(--jp-layout-color1, #ffffff);
+  --freebsd-lab-surface-secondary: var(--jp-layout-color2, #fafafa);
+  --freebsd-lab-surface-tertiary: var(--jp-layout-color3, #f5f5f5);
+  --freebsd-lab-surface-highlight: var(--jp-layout-color0, #f8f8f8);
+  --freebsd-lab-surface-brand: var(--freebsd-lab-red-soft, #fff3f3);
+  --freebsd-lab-surface-brand-dark: var(--freebsd-lab-red, #b31b21);
+  --freebsd-lab-surface-masthead: #050505;
+  --freebsd-lab-surface-status: #a70b12;
+
+  /* 3. Semantic Typography & Text Hierarchy */
+  --freebsd-lab-text-primary: var(--jp-ui-font-color0, #191919);
+  --freebsd-lab-text-secondary: var(--jp-ui-font-color1, #303030);
+  --freebsd-lab-text-muted: var(--jp-ui-font-color2, #666666);
+  --freebsd-lab-text-subdued: var(--jp-ui-font-color3, #777777);
+  --freebsd-lab-text-on-brand: #ffffff;
+  --freebsd-lab-text-on-dark: #ffffff;
+  --freebsd-lab-text-brand: var(--freebsd-lab-red, #b31b21);
+  --freebsd-lab-text-accent: var(--freebsd-lab-blue, #1479c9);
+  --freebsd-lab-text-error: #a20e16;
+
+  /* Font Families */
+  --freebsd-lab-font-sans: var(--jp-ui-font-family, -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif);
+  --freebsd-lab-font-serif: Georgia, "Times New Roman", serif;
+  --freebsd-lab-font-mono: var(--jp-code-font-family, Menlo, Consolas, "Courier New", monospace);
+
+  /* Font Scale */
+  --freebsd-lab-font-size-2xs: 8px;
+  --freebsd-lab-font-size-xs: 9px;
+  --freebsd-lab-font-size-sm: 10px;
+  --freebsd-lab-font-size-base: 11px;
+  --freebsd-lab-font-size-md: 12px;
+  --freebsd-lab-font-size-lg: 13px;
+  --freebsd-lab-font-size-xl: 14px;
+  --freebsd-lab-font-size-2xl: 15px;
+  --freebsd-lab-font-size-3xl: 18px;
+  --freebsd-lab-font-size-4xl: 23px;
+  --freebsd-lab-font-size-5xl: 30px;
+  --freebsd-lab-font-size-6xl: 36px;
+
+  /* Font Weights */
+  --freebsd-lab-font-weight-light: 300;
+  --freebsd-lab-font-weight-normal: 400;
+  --freebsd-lab-font-weight-medium: 500;
+  --freebsd-lab-font-weight-semibold: 600;
+  --freebsd-lab-font-weight-bold: 700;
+
+  /* Line Heights */
+  --freebsd-lab-line-height-tight: 1.05;
+  --freebsd-lab-line-height-snug: 1.25;
+  --freebsd-lab-line-height-normal: 1.45;
+  --freebsd-lab-line-height-relaxed: 1.55;
+
+  /* 4. Borders & Dividers */
+  --freebsd-lab-border-subtle: var(--jp-border-color2, #dedede);
+  --freebsd-lab-border-default: var(--jp-border-color1, #d2d2d2);
+  --freebsd-lab-border-strong: var(--jp-border-color0, #bfc5ca);
+  --freebsd-lab-border-brand: var(--freebsd-lab-red, #b31b21);
+  --freebsd-lab-border-brand-soft: #d48286;
+  --freebsd-lab-border-brand-accent: #e1b1b3;
+  --freebsd-lab-border-on-dark: rgba(255, 255, 255, 0.2);
+
+  /* 5. Radii, Spacing & Elevation Metrics */
+  --freebsd-lab-radius-none: 0px;
+  --freebsd-lab-radius-xs: 2px;
+  --freebsd-lab-radius-sm: 4px;
+  --freebsd-lab-radius-md: 6px;
+  --freebsd-lab-radius-lg: 8px;
+  --freebsd-lab-radius-full: 9999px;
+
+  --freebsd-lab-space-1: 4px;
+  --freebsd-lab-space-2: 8px;
+  --freebsd-lab-space-3: 12px;
+  --freebsd-lab-space-4: 16px;
+  --freebsd-lab-space-5: 20px;
+  --freebsd-lab-space-6: 24px;
+  --freebsd-lab-space-8: 32px;
+
+  --freebsd-lab-elevation-none: none;
+  --freebsd-lab-elevation-1: 0 1px 3px rgba(0, 0, 0, 0.04), 0 1px 2px rgba(0, 0, 0, 0.02);
+  --freebsd-lab-elevation-2: 0 4px 6px -1px rgba(0, 0, 0, 0.06), 0 2px 4px -1px rgba(0, 0, 0, 0.03);
+  --freebsd-lab-elevation-card: 0 1px 3px rgba(0, 0, 0, 0.05), 0 1px 2px rgba(0, 0, 0, 0.03);
+
+  /* 6. Layout Shell Constants (Contract Invariants) */
+  --freebsd-lab-shell-header-height: 80px;
+  --freebsd-lab-shell-status-height: 34px;
+  --freebsd-lab-shell-left-sidebar-width: 49px;
+  --freebsd-lab-shell-left-stack-width: 325px;
+  --freebsd-lab-shell-right-stack-width: 270px;
+
+  font-family: var(--freebsd-lab-font-sans);
 }
 
 /* -------------------------------------------------------------------------- */
-/* Application frame                                                           */
+/* Section 2: Application Frame & Masthead Header                             */
 /* -------------------------------------------------------------------------- */
 
 body.freebsdLab-ReferenceShell #jp-header-panel {
   min-height: 80px !important;
   max-height: 80px !important;
-  background: var(--freebsd-lab-black);
-  border-bottom: 1px solid var(--freebsd-lab-red);
+  background: var(--freebsd-lab-surface-masthead);
+  border-bottom: 1px solid var(--freebsd-lab-border-brand);
   overflow: hidden;
 }
 
@@ -32,10 +138,10 @@ body.freebsdLab-ReferenceShell #jp-header-panel {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 28px 0 18px;
+  padding: 0 var(--freebsd-lab-space-6) 0 18px;
   overflow: hidden;
-  background: #050505;
-  color: #fff;
+  background: var(--freebsd-lab-surface-masthead);
+  color: var(--freebsd-lab-text-on-dark);
 }
 
 .freebsdLab-Masthead::after {
@@ -46,8 +152,8 @@ body.freebsdLab-ReferenceShell #jp-header-panel {
   height: 1200px;
   right: -345px;
   top: -1119px;
-  border: 6px solid #c3151d;
-  border-radius: 50%;
+  border: 6px solid var(--freebsd-lab-red-hover);
+  border-radius: var(--freebsd-lab-radius-full);
   pointer-events: none;
 }
 
@@ -76,10 +182,10 @@ body.freebsdLab-ReferenceShell #jp-header-panel {
 }
 
 .freebsdLab-Wordmark {
-  color: #fff;
-  font-family: Georgia, "Times New Roman", serif;
-  font-size: 36px;
-  font-weight: 400;
+  color: var(--freebsd-lab-text-on-dark);
+  font-family: var(--freebsd-lab-font-serif);
+  font-size: var(--freebsd-lab-font-size-6xl);
+  font-weight: var(--freebsd-lab-font-weight-normal);
   line-height: 1;
   letter-spacing: -1.4px;
   white-space: nowrap;
@@ -88,15 +194,15 @@ body.freebsdLab-ReferenceShell #jp-header-panel {
 .freebsdLab-BrandDivider {
   width: 1px;
   height: 39px;
-  margin: 0 20px;
-  background: #858585;
+  margin: 0 var(--freebsd-lab-space-5);
+  background: var(--freebsd-lab-border-on-dark);
   opacity: 0.8;
 }
 
 .freebsdLab-Tagline {
-  color: #f1f1f1;
+  color: rgba(255, 255, 255, 0.92);
   font-size: 17px;
-  font-weight: 300;
+  font-weight: var(--freebsd-lab-font-weight-light);
   white-space: nowrap;
 }
 
@@ -110,28 +216,32 @@ body.freebsdLab-ReferenceShell #jp-header-panel {
 }
 
 .freebsdLab-MastheadTitle {
-  color: #fff;
-  font-size: 23px;
-  font-weight: 650;
-  line-height: 1.05;
+  color: var(--freebsd-lab-text-on-dark);
+  font-size: var(--freebsd-lab-font-size-4xl);
+  font-weight: var(--freebsd-lab-font-weight-semibold);
+  line-height: var(--freebsd-lab-line-height-tight);
 }
 
 .freebsdLab-MastheadSubtitle {
-  margin-top: 4px;
-  color: #d8d8d8;
-  font-size: 12px;
-  font-weight: 400;
+  margin-top: var(--freebsd-lab-space-1);
+  color: var(--freebsd-lab-border-default);
+  font-size: var(--freebsd-lab-font-size-md);
+  font-weight: var(--freebsd-lab-font-weight-normal);
   white-space: nowrap;
 }
+
+/* -------------------------------------------------------------------------- */
+/* Section 3: Top Navigation & Shell Menu Chrome                              */
+/* -------------------------------------------------------------------------- */
 
 body.freebsdLab-ReferenceShell #jp-top-panel {
   position: relative;
   box-sizing: border-box;
   min-height: 43px !important;
   max-height: 43px !important;
-  padding-left: 49px;
-  background: #fff !important;
-  border-bottom: 1px solid #d2d2d2;
+  padding-left: var(--freebsd-lab-shell-left-sidebar-width);
+  background: var(--freebsd-lab-surface-primary) !important;
+  border-bottom: 1px solid var(--freebsd-lab-border-default);
 }
 
 body.freebsdLab-ReferenceShell #jp-top-panel::before {
@@ -139,9 +249,9 @@ body.freebsdLab-ReferenceShell #jp-top-panel::before {
   position: absolute;
   left: 0;
   top: 0;
-  width: 49px;
+  width: var(--freebsd-lab-shell-left-sidebar-width);
   height: 43px;
-  border-right: 1px solid #d2d2d2;
+  border-right: 1px solid var(--freebsd-lab-border-default);
   background-position: center;
   background-repeat: no-repeat;
   background-size: 27px 27px;
@@ -150,20 +260,20 @@ body.freebsdLab-ReferenceShell #jp-top-panel::before {
 
 body.freebsdLab-ReferenceShell #jp-menu-panel {
   min-height: 42px !important;
-  background: #fff !important;
+  background: var(--freebsd-lab-surface-primary) !important;
   box-shadow: none !important;
 }
 
 body.freebsdLab-ReferenceShell #jp-menu-panel .lm-MenuBar {
   height: 42px;
   padding-left: 6px;
-  background: #fff;
+  background: var(--freebsd-lab-surface-primary);
 }
 
 body.freebsdLab-ReferenceShell #jp-menu-panel .lm-MenuBar-item {
   padding: 0 10px;
-  color: #202020;
-  font-size: 14px;
+  color: var(--freebsd-lab-text-secondary);
+  font-size: var(--freebsd-lab-font-size-xl);
   line-height: 42px;
 }
 
@@ -175,11 +285,11 @@ body.freebsdLab-ReferenceShell #jp-main-content-panel,
 body.freebsdLab-ReferenceShell #jp-main-vsplit-panel,
 body.freebsdLab-ReferenceShell #jp-main-split-panel,
 body.freebsdLab-ReferenceShell #jp-main-dock-panel {
-  background: #fff;
+  background: var(--freebsd-lab-surface-primary);
 }
 
 /* -------------------------------------------------------------------------- */
-/* Left browser / activity rail                                                */
+/* Section 4: Left Activity Bar & File Browser Stack                          */
 /* -------------------------------------------------------------------------- */
 
 body.freebsdLab-ReferenceShell .jp-SideBar.jp-mod-left {
@@ -187,13 +297,13 @@ body.freebsdLab-ReferenceShell .jp-SideBar.jp-mod-left {
   width: 49px !important;
   min-width: 49px !important;
   max-width: 49px !important;
-  background: #fff;
-  border-right: 1px solid #d2d2d2;
+  background: var(--freebsd-lab-surface-primary);
+  border-right: 1px solid var(--freebsd-lab-border-default);
 }
 
 body.freebsdLab-ReferenceShell .jp-SideBar.jp-mod-left .lm-TabBar-tab {
   min-height: 48px;
-  color: #4b4b4b;
+  color: var(--freebsd-lab-text-secondary);
 }
 
 body.freebsdLab-ReferenceShell .jp-SideBar.jp-mod-left .lm-TabBar-tab.jp-mod-current,
@@ -208,99 +318,101 @@ body.freebsdLab-ReferenceShell .jp-SideArea[data-side="left"] {
   width: 325px !important;
   min-width: 325px !important;
   max-width: 325px !important;
-  border-right: 1px solid #cfcfcf;
-  background: #fff;
+  border-right: 1px solid var(--freebsd-lab-border-subtle);
+  background: var(--freebsd-lab-surface-primary);
 }
 
 body.freebsdLab-ReferenceShell .jp-FileBrowser {
   min-width: 0 !important;
-  background: #fff;
+  background: var(--freebsd-lab-surface-primary);
 }
 
 body.freebsdLab-ReferenceShell .jp-FileBrowser-toolbar {
   min-height: 43px;
-  padding: 4px 7px;
-  border-bottom: 1px solid #dedede;
-  background: #fff;
+  padding: var(--freebsd-lab-space-1) 7px;
+  border-bottom: 1px solid var(--freebsd-lab-border-subtle);
+  background: var(--freebsd-lab-surface-primary);
 }
 
 body.freebsdLab-ReferenceShell .jp-FileBrowser-filterBox {
-  margin: 7px 8px 5px;
+  margin: 7px var(--freebsd-lab-space-2) 5px;
 }
 
 body.freebsdLab-ReferenceShell .jp-FileBrowser-filterBox input {
   min-height: 29px;
-  border: 1px solid #bfc5ca;
-  border-radius: 1px;
-  background: #fff;
-  font-size: 12px;
+  border: 1px solid var(--freebsd-lab-border-strong);
+  border-radius: var(--freebsd-lab-radius-xs);
+  background: var(--freebsd-lab-surface-primary);
+  color: var(--freebsd-lab-text-primary);
+  font-size: var(--freebsd-lab-font-size-md);
 }
 
 body.freebsdLab-ReferenceShell .jp-FileBrowser-breadcrumbs {
   min-height: 35px;
   padding: 0 10px;
-  border-bottom: 1px solid #ddd;
-  color: #3d3d3d;
-  font-size: 12px;
+  border-bottom: 1px solid var(--freebsd-lab-border-subtle);
+  color: var(--freebsd-lab-text-secondary);
+  font-size: var(--freebsd-lab-font-size-md);
 }
 
 body.freebsdLab-ReferenceShell .jp-DirListing-header {
   min-height: 28px;
-  background: #f7f7f7;
-  border-bottom: 1px solid #d7d7d7;
-  color: #555;
-  font-size: 10px;
-  font-weight: 650;
+  background: var(--freebsd-lab-surface-secondary);
+  border-bottom: 1px solid var(--freebsd-lab-border-default);
+  color: var(--freebsd-lab-text-muted);
+  font-size: var(--freebsd-lab-font-size-sm);
+  font-weight: var(--freebsd-lab-font-weight-semibold);
   letter-spacing: 0.02em;
   text-transform: uppercase;
 }
 
 body.freebsdLab-ReferenceShell .jp-DirListing-item {
   min-height: 27px;
-  color: #222;
-  font-size: 12px;
+  color: var(--freebsd-lab-text-primary);
+  font-size: var(--freebsd-lab-font-size-md);
 }
 
 body.freebsdLab-ReferenceShell .jp-DirListing-item.jp-mod-selected {
-  background: #1477c7 !important;
-  color: #fff !important;
+  background: var(--freebsd-lab-blue) !important;
+  color: var(--freebsd-lab-text-on-brand) !important;
 }
 
 body.freebsdLab-ReferenceShell .jp-DirListing-item.jp-mod-selected .jp-DirListing-itemText,
 body.freebsdLab-ReferenceShell .jp-DirListing-item.jp-mod-selected .jp-DirListing-itemModified {
-  color: #fff !important;
+  color: var(--freebsd-lab-text-on-brand) !important;
 }
 
 /* -------------------------------------------------------------------------- */
-/* Main document tabs and notebook chrome                                      */
+/* Section 5: Main Dock Panel, Tabs & Notebook Toolbar                        */
 /* -------------------------------------------------------------------------- */
 
 body.freebsdLab-ReferenceShell #jp-main-dock-panel > .lm-DockPanel-tabBar,
 body.freebsdLab-ReferenceShell #jp-main-dock-panel .lm-DockPanel-tabBar {
   min-height: 41px;
   max-height: 41px;
-  background: #f8f8f8;
-  border-bottom: 1px solid #d4d4d4;
+  background: var(--freebsd-lab-surface-highlight);
+  border-bottom: 1px solid var(--freebsd-lab-border-default);
 }
 
 body.freebsdLab-ReferenceShell #jp-main-dock-panel .lm-TabBar-tab {
   box-sizing: border-box;
   min-height: 40px;
   padding: 0 15px;
-  border-right: 1px solid #dedede;
-  background: #f8f8f8;
-  color: #303030;
-  font-size: 13px;
+  border-right: 1px solid var(--freebsd-lab-border-subtle);
+  background: var(--freebsd-lab-surface-highlight);
+  color: var(--freebsd-lab-text-secondary);
+  font-size: var(--freebsd-lab-font-size-lg);
 }
 
 body.freebsdLab-ReferenceShell #jp-main-dock-panel .lm-TabBar-tab.lm-mod-current,
 body.freebsdLab-ReferenceShell #jp-main-dock-panel .lm-TabBar-tab.jp-mod-current {
   border-top: 3px solid var(--freebsd-lab-blue);
-  background: #fff;
+  background: var(--freebsd-lab-surface-primary);
+  color: var(--freebsd-lab-text-primary);
 }
 
 body.freebsdLab-ReferenceShell .freebsdLab-NotebookPanel {
-  background: #fff;
+  background: var(--freebsd-lab-surface-primary);
 }
 
 body.freebsdLab-ReferenceShell .freebsdLab-NotebookPanel .jp-NotebookPanel-toolbar {
@@ -308,8 +420,8 @@ body.freebsdLab-ReferenceShell .freebsdLab-NotebookPanel .jp-NotebookPanel-toolb
   min-height: 46px;
   max-height: 46px;
   padding: 7px 10px;
-  border-bottom: 1px solid #d3d3d3;
-  background: #fff;
+  border-bottom: 1px solid var(--freebsd-lab-border-default);
+  background: var(--freebsd-lab-surface-primary);
   box-shadow: none;
 }
 
@@ -318,28 +430,31 @@ body.freebsdLab-ReferenceShell .jp-NotebookPanel-toolbar .jp-Toolbar-item {
 }
 
 body.freebsdLab-ReferenceShell .jp-NotebookPanel-toolbar .jp-ToolbarButtonComponent {
-  border-radius: 2px;
+  border-radius: var(--freebsd-lab-radius-xs);
 }
 
 .freebsdLab-ExportButton.jp-ToolbarButtonComponent {
   min-height: 29px;
   margin-left: auto !important;
-  padding: 0 12px;
-  border: 1px solid var(--freebsd-lab-red) !important;
-  border-radius: 2px !important;
+  padding: 0 var(--freebsd-lab-space-3);
+  border: 1px solid var(--freebsd-lab-border-brand) !important;
+  border-radius: var(--freebsd-lab-radius-xs) !important;
   background: var(--freebsd-lab-red) !important;
-  color: #fff !important;
+  color: var(--freebsd-lab-text-on-brand) !important;
   box-shadow: none !important;
+  cursor: pointer;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
 }
 
 .freebsdLab-ExportButton.jp-ToolbarButtonComponent:hover {
   background: var(--freebsd-lab-red-dark) !important;
+  border-color: var(--freebsd-lab-red-dark) !important;
 }
 
 .freebsdLab-ExportButton .jp-ToolbarButtonComponent-label {
-  color: #fff !important;
-  font-size: 11px;
-  font-weight: 650;
+  color: var(--freebsd-lab-text-on-brand) !important;
+  font-size: var(--freebsd-lab-font-size-base);
+  font-weight: var(--freebsd-lab-font-weight-semibold);
   white-space: nowrap;
 }
 
@@ -347,17 +462,21 @@ body.freebsdLab-ReferenceShell .jp-NotebookPanel-toolbar .jp-ToolbarButtonCompon
   box-sizing: border-box;
   min-height: 26px;
   max-height: 26px;
-  padding: 6px 12px 5px;
-  border-bottom: 1px solid #dedede;
-  background: #fafafa;
-  color: #777;
-  font-family: var(--jp-code-font-family, monospace);
-  font-size: 10px;
+  padding: 6px var(--freebsd-lab-space-3) 5px;
+  border-bottom: 1px solid var(--freebsd-lab-border-subtle);
+  background: var(--freebsd-lab-surface-secondary);
+  color: var(--freebsd-lab-text-subdued);
+  font-family: var(--freebsd-lab-font-mono);
+  font-size: var(--freebsd-lab-font-size-sm);
   line-height: 14px;
 }
 
+/* -------------------------------------------------------------------------- */
+/* Section 6: Notebook Cells & Execution Styling                              */
+/* -------------------------------------------------------------------------- */
+
 body.freebsdLab-ReferenceShell .freebsdLab-NotebookPanel .jp-Notebook {
-  background: #fff;
+  background: var(--freebsd-lab-surface-primary);
 }
 
 body.freebsdLab-ReferenceShell .freebsdLab-NotebookPanel .jp-Notebook-cell {
@@ -375,59 +494,62 @@ body.freebsdLab-ReferenceShell .freebsdLab-NotebookPanel .jp-Cell.jp-mod-active 
 
 body.freebsdLab-ReferenceShell .freebsdLab-NotebookPanel .jp-Cell.jp-mod-selected .jp-InputArea-editor,
 body.freebsdLab-ReferenceShell .freebsdLab-NotebookPanel .jp-Cell.jp-mod-active .jp-InputArea-editor {
-  border-color: #d5d5d5 !important;
+  border-color: var(--freebsd-lab-border-default) !important;
   outline: 0 !important;
   box-shadow: none !important;
 }
 
 body.freebsdLab-ReferenceShell .freebsdLab-NotebookPanel .jp-MarkdownOutput {
-  color: #1d1d1d;
-  font-size: 13px;
+  color: var(--freebsd-lab-text-primary);
+  font-size: var(--freebsd-lab-font-size-lg);
+  line-height: var(--freebsd-lab-line-height-relaxed);
 }
 
 body.freebsdLab-ReferenceShell .freebsdLab-NotebookPanel .jp-MarkdownOutput h2 {
-  margin: 20px 0 4px;
-  color: #161616;
+  margin: var(--freebsd-lab-space-5) 0 var(--freebsd-lab-space-1);
+  color: var(--freebsd-lab-text-primary);
   font-size: 20px;
-  font-weight: 650;
-  line-height: 1.25;
+  font-weight: var(--freebsd-lab-font-weight-semibold);
+  line-height: var(--freebsd-lab-line-height-snug);
 }
 
 body.freebsdLab-ReferenceShell .freebsdLab-NotebookPanel .jp-MarkdownOutput h2 + p {
   margin-top: 0;
-  color: #555;
-  font-size: 12px;
+  color: var(--freebsd-lab-text-muted);
+  font-size: var(--freebsd-lab-font-size-md);
 }
 
 body.freebsdLab-ReferenceShell .freebsdLab-NotebookPanel .jp-CodeCell .jp-InputArea-editor {
-  border: 1px solid #d5d5d5;
-  border-radius: 0;
-  background: #f5f5f5;
+  border: 1px solid var(--freebsd-lab-border-default);
+  border-radius: var(--freebsd-lab-radius-none);
+  background: var(--freebsd-lab-surface-tertiary);
 }
 
 body.freebsdLab-ReferenceShell .freebsdLab-NotebookPanel .jp-CodeCell .cm-editor,
 body.freebsdLab-ReferenceShell .freebsdLab-NotebookPanel .jp-CodeCell .cm-scroller {
-  background: #f5f5f5;
-  font-size: 11px;
+  background: var(--freebsd-lab-surface-tertiary);
+  font-size: var(--freebsd-lab-font-size-base);
 }
 
 body.freebsdLab-ReferenceShell .freebsdLab-NotebookPanel .jp-InputPrompt,
 body.freebsdLab-ReferenceShell .freebsdLab-NotebookPanel .jp-OutputPrompt {
-  color: #1768b1;
-  font-family: var(--jp-code-font-family, monospace);
-  font-size: 10px;
+  color: var(--freebsd-lab-blue);
+  font-family: var(--freebsd-lab-font-mono);
+  font-size: var(--freebsd-lab-font-size-sm);
 }
 
 body.freebsdLab-ReferenceShell .freebsdLab-NotebookPanel .jp-OutputArea-output {
-  color: #222;
-  font-size: 11px;
+  color: var(--freebsd-lab-text-primary);
+  font-size: var(--freebsd-lab-font-size-base);
 }
 
-/* Introductory design card */
+/* -------------------------------------------------------------------------- */
+/* Section 7: Intro Hero Card & Notice Callout                                */
+/* -------------------------------------------------------------------------- */
 
 body.freebsdLab-ReferenceShell .freebsdLab-IntroCell {
   padding-top: 22px;
-  padding-bottom: 8px;
+  padding-bottom: var(--freebsd-lab-space-2);
 }
 
 body.freebsdLab-ReferenceShell .freebsdLab-IntroCell .jp-InputPrompt {
@@ -442,11 +564,11 @@ body.freebsdLab-ReferenceShell .freebsdLab-IntroCell .jp-Cell-inputWrapper {
   box-sizing: border-box;
   width: 100%;
   margin: 0;
-  padding: 20px 22px 18px;
-  border: 1px solid #cecece;
-  border-radius: 2px;
-  background: #fff;
-  box-shadow: 0 1px 1px rgb(0 0 0 / 4%);
+  padding: var(--freebsd-lab-space-5) 22px 18px;
+  border: 1px solid var(--freebsd-lab-border-subtle);
+  border-radius: var(--freebsd-lab-radius-xs);
+  background: var(--freebsd-lab-surface-primary);
+  box-shadow: var(--freebsd-lab-elevation-card);
 }
 
 .freebsdLab-IntroBrand {
@@ -454,55 +576,56 @@ body.freebsdLab-ReferenceShell .freebsdLab-IntroCell .jp-Cell-inputWrapper {
   align-items: center;
   gap: 6px;
   margin-bottom: 9px;
-  color: #555;
-  font-family: Georgia, "Times New Roman", serif;
-  font-size: 11px;
+  color: var(--freebsd-lab-text-muted);
+  font-family: var(--freebsd-lab-font-serif);
+  font-size: var(--freebsd-lab-font-size-base);
 }
 
 .freebsdLab-IntroBrand::before {
   content: "";
   width: 13px;
   height: 13px;
-  border-radius: 50%;
+  border-radius: var(--freebsd-lab-radius-full);
   background: var(--freebsd-lab-red);
   box-shadow: -5px -5px 0 -3px var(--freebsd-lab-red), 5px -5px 0 -3px var(--freebsd-lab-red);
 }
 
 .freebsdLab-IntroTitle {
-  margin: 0 !important;
-  color: #191919 !important;
-  font-size: 30px !important;
-  font-weight: 400 !important;
-  line-height: 1.12 !important;
+  margin: 0;
+  color: var(--freebsd-lab-text-primary);
+  font-size: var(--freebsd-lab-font-size-5xl);
+  font-weight: var(--freebsd-lab-font-weight-normal);
+  line-height: 1.12;
   letter-spacing: -0.5px;
 }
 
 .freebsdLab-IntroTagline {
-  margin: 8px 0 12px !important;
-  color: var(--freebsd-lab-red) !important;
-  font-family: Georgia, "Times New Roman", serif;
-  font-size: 15px !important;
+  margin: var(--freebsd-lab-space-2) 0 var(--freebsd-lab-space-3);
+  color: var(--freebsd-lab-red);
+  font-family: var(--freebsd-lab-font-serif);
+  font-size: var(--freebsd-lab-font-size-2xl);
   font-style: italic;
 }
 
 .freebsdLab-IntroCopy {
   max-width: 740px;
-  margin: 0 0 17px !important;
-  color: #454545 !important;
-  font-size: 12px !important;
-  line-height: 1.55 !important;
+  margin: 0 0 17px;
+  color: var(--freebsd-lab-text-secondary);
+  font-size: var(--freebsd-lab-font-size-md);
+  line-height: var(--freebsd-lab-line-height-relaxed);
 }
 
 .freebsdLab-IntroNotice {
   display: grid;
   grid-template-columns: 32px minmax(0, 1fr) auto;
-  gap: 12px;
+  gap: var(--freebsd-lab-space-3);
   align-items: center;
   min-height: 72px;
   padding: 11px 14px;
-  border: 1px solid #d48286;
-  border-left: 4px solid var(--freebsd-lab-red);
-  background: var(--freebsd-lab-red-soft);
+  border: 1px solid var(--freebsd-lab-border-brand-soft);
+  border-left: 4px solid var(--freebsd-lab-border-brand);
+  border-radius: var(--freebsd-lab-radius-xs);
+  background: var(--freebsd-lab-surface-brand);
 }
 
 .freebsdLab-IntroNoticeIcon {
@@ -511,36 +634,36 @@ body.freebsdLab-ReferenceShell .freebsdLab-IntroCell .jp-Cell-inputWrapper {
   justify-content: center;
   width: 27px;
   height: 27px;
-  border: 1px solid var(--freebsd-lab-red);
-  border-radius: 50%;
+  border: 1px solid var(--freebsd-lab-border-brand);
+  border-radius: var(--freebsd-lab-radius-full);
   color: var(--freebsd-lab-red);
-  font-family: Georgia, serif;
-  font-size: 18px;
+  font-family: var(--freebsd-lab-font-serif);
+  font-size: var(--freebsd-lab-font-size-3xl);
   font-style: italic;
-  font-weight: 700;
+  font-weight: var(--freebsd-lab-font-weight-bold);
 }
 
 .freebsdLab-IntroNoticeLabel {
   margin-bottom: 3px;
-  color: #4a4a4a;
-  font-size: 9px;
-  font-weight: 750;
+  color: var(--freebsd-lab-text-secondary);
+  font-size: var(--freebsd-lab-font-size-xs);
+  font-weight: var(--freebsd-lab-font-weight-bold);
   letter-spacing: 0.09em;
   text-transform: uppercase;
 }
 
 .freebsdLab-IntroNoticeText {
   max-width: 670px;
-  color: #4c4c4c;
-  font-size: 10px;
-  line-height: 1.45;
+  color: var(--freebsd-lab-text-secondary);
+  font-size: var(--freebsd-lab-font-size-sm);
+  line-height: var(--freebsd-lab-line-height-normal);
 }
 
 .freebsdLab-IntroNoticeMeta {
   padding-left: 18px;
-  border-left: 1px solid #e1b1b3;
-  color: #555;
-  font-size: 10px;
+  border-left: 1px solid var(--freebsd-lab-border-brand-accent);
+  color: var(--freebsd-lab-text-muted);
+  font-size: var(--freebsd-lab-font-size-sm);
   line-height: 1.35;
   text-align: right;
   white-space: nowrap;
@@ -549,13 +672,13 @@ body.freebsdLab-ReferenceShell .freebsdLab-IntroCell .jp-Cell-inputWrapper {
 .freebsdLab-IntroNoticeMeta strong {
   display: block;
   color: var(--freebsd-lab-red);
-  font-family: Georgia, "Times New Roman", serif;
-  font-size: 14px;
-  font-weight: 600;
+  font-family: var(--freebsd-lab-font-serif);
+  font-size: var(--freebsd-lab-font-size-xl);
+  font-weight: var(--freebsd-lab-font-weight-semibold);
 }
 
 /* -------------------------------------------------------------------------- */
-/* Right progression panel                                                     */
+/* Section 8: Right Progression Panel                                         */
 /* -------------------------------------------------------------------------- */
 
 body.freebsdLab-ReferenceShell .jp-SideBar.jp-mod-right {
@@ -571,8 +694,8 @@ body.freebsdLab-ReferenceShell .jp-SideArea[data-side="right"] {
   width: 270px !important;
   min-width: 270px !important;
   max-width: 270px !important;
-  border-left: 1px solid #d0d0d0;
-  background: #fff;
+  border-left: 1px solid var(--freebsd-lab-border-default);
+  background: var(--freebsd-lab-surface-primary);
 }
 
 .freebsdLab-Progression {
@@ -581,9 +704,9 @@ body.freebsdLab-ReferenceShell .jp-SideArea[data-side="right"] {
   height: 100%;
   display: flex;
   flex-direction: column;
-  background: #fff;
-  color: #222;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
+  background: var(--freebsd-lab-surface-primary);
+  color: var(--freebsd-lab-text-primary);
+  font-family: var(--freebsd-lab-font-sans);
 }
 
 .freebsdLab-ProgressHeader {
@@ -592,23 +715,23 @@ body.freebsdLab-ReferenceShell .jp-SideArea[data-side="right"] {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 10px 0 12px;
-  border-bottom: 1px solid #d3d3d3;
-  background: #fafafa;
+  padding: 0 10px 0 var(--freebsd-lab-space-3);
+  border-bottom: 1px solid var(--freebsd-lab-border-default);
+  background: var(--freebsd-lab-surface-secondary);
 }
 
 .freebsdLab-ProgressHeaderTitle {
   display: flex;
   align-items: center;
-  gap: 8px;
-  color: #202020;
-  font-size: 12px;
-  font-weight: 650;
+  gap: var(--freebsd-lab-space-2);
+  color: var(--freebsd-lab-text-primary);
+  font-size: var(--freebsd-lab-font-size-md);
+  font-weight: var(--freebsd-lab-font-weight-semibold);
 }
 
 .freebsdLab-ProgressHeaderMark {
   color: var(--freebsd-lab-red);
-  font-size: 15px;
+  font-size: var(--freebsd-lab-font-size-2xl);
 }
 
 .freebsdLab-ProgressClose {
@@ -616,16 +739,18 @@ body.freebsdLab-ReferenceShell .jp-SideArea[data-side="right"] {
   height: 24px;
   padding: 0;
   border: 0;
+  border-radius: var(--freebsd-lab-radius-xs);
   background: transparent;
-  color: #555;
-  font-size: 18px;
+  color: var(--freebsd-lab-text-muted);
+  font-size: var(--freebsd-lab-font-size-3xl);
   line-height: 22px;
   cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease;
 }
 
 .freebsdLab-ProgressClose:hover {
-  color: #111;
-  background: #ededed;
+  color: var(--freebsd-lab-text-primary);
+  background: var(--freebsd-lab-surface-tertiary);
 }
 
 .freebsdLab-Body {
@@ -636,29 +761,29 @@ body.freebsdLab-ReferenceShell .jp-SideArea[data-side="right"] {
 
 .freebsdLab-Section {
   padding: 17px 14px;
-  border-bottom: 1px solid #dedede;
+  border-bottom: 1px solid var(--freebsd-lab-border-subtle);
 }
 
 .freebsdLab-Eyebrow {
   margin-bottom: 9px;
-  color: #777;
-  font-size: 8px;
-  font-weight: 750;
+  color: var(--freebsd-lab-text-subdued);
+  font-size: var(--freebsd-lab-font-size-2xs);
+  font-weight: var(--freebsd-lab-font-weight-bold);
   letter-spacing: 0.12em;
   text-transform: uppercase;
 }
 
 .freebsdLab-PathTitle {
   margin-bottom: 5px;
-  color: #202020;
-  font-size: 12px;
-  font-weight: 700;
+  color: var(--freebsd-lab-text-primary);
+  font-size: var(--freebsd-lab-font-size-md);
+  font-weight: var(--freebsd-lab-font-weight-bold);
 }
 
 .freebsdLab-Muted {
-  color: #737373;
-  font-size: 10px;
-  line-height: 1.45;
+  color: var(--freebsd-lab-text-muted);
+  font-size: var(--freebsd-lab-font-size-sm);
+  line-height: var(--freebsd-lab-line-height-normal);
 }
 
 .freebsdLab-Stages {
@@ -672,8 +797,8 @@ body.freebsdLab-ReferenceShell .jp-SideArea[data-side="right"] {
   display: flex;
   align-items: center;
   gap: 9px;
-  color: #777;
-  font-size: 11px;
+  color: var(--freebsd-lab-text-subdued);
+  font-size: var(--freebsd-lab-font-size-base);
 }
 
 .freebsdLab-StageMarker {
@@ -684,27 +809,27 @@ body.freebsdLab-ReferenceShell .jp-SideArea[data-side="right"] {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border: 1px solid #c8c8c8;
-  border-radius: 50%;
-  background: #fff;
-  color: #888;
-  font-size: 9px;
+  border: 1px solid var(--freebsd-lab-border-default);
+  border-radius: var(--freebsd-lab-radius-full);
+  background: var(--freebsd-lab-surface-primary);
+  color: var(--freebsd-lab-text-subdued);
+  font-size: var(--freebsd-lab-font-size-xs);
   line-height: 1;
 }
 
 .freebsdLab-Stage.is-complete {
-  color: #272727;
-  font-weight: 650;
+  color: var(--freebsd-lab-text-primary);
+  font-weight: var(--freebsd-lab-font-weight-semibold);
 }
 
 .freebsdLab-Stage.is-complete .freebsdLab-StageMarker {
   border-color: var(--freebsd-lab-red);
   background: var(--freebsd-lab-red);
-  color: #fff;
+  color: var(--freebsd-lab-text-on-brand);
 }
 
 .freebsdLab-Facts {
-  border-bottom: 1px solid #dedede;
+  border-bottom: 1px solid var(--freebsd-lab-border-subtle);
 }
 
 .freebsdLab-Fact {
@@ -716,17 +841,17 @@ body.freebsdLab-ReferenceShell .jp-SideArea[data-side="right"] {
 }
 
 .freebsdLab-FactLabel {
-  color: #777;
-  font-size: 8px;
-  font-weight: 750;
+  color: var(--freebsd-lab-text-subdued);
+  font-size: var(--freebsd-lab-font-size-2xs);
+  font-weight: var(--freebsd-lab-font-weight-bold);
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
 
 .freebsdLab-FactValue {
-  color: #303030;
-  font-size: 10px;
-  font-weight: 650;
+  color: var(--freebsd-lab-text-secondary);
+  font-size: var(--freebsd-lab-font-size-sm);
+  font-weight: var(--freebsd-lab-font-weight-semibold);
   line-height: 1.35;
   text-align: right;
   overflow-wrap: anywhere;
@@ -734,48 +859,49 @@ body.freebsdLab-ReferenceShell .jp-SideArea[data-side="right"] {
 
 .freebsdLab-Footer {
   flex: 0 0 auto;
-  padding: 13px 14px 16px;
-  border-top: 1px solid #dedede;
-  background: #fff;
+  padding: 13px 14px var(--freebsd-lab-space-4);
+  border-top: 1px solid var(--freebsd-lab-border-subtle);
+  background: var(--freebsd-lab-surface-primary);
 }
 
 .freebsdLab-Attestation {
   display: inline-block;
-  padding: 2px 5px;
-  border: 1px solid var(--freebsd-lab-red);
+  padding: 2px 6px;
+  border: 1px solid var(--freebsd-lab-border-brand);
+  border-radius: var(--freebsd-lab-radius-xs);
   color: var(--freebsd-lab-red);
-  font-size: 8px;
-  font-weight: 750;
+  font-size: var(--freebsd-lab-font-size-2xs);
+  font-weight: var(--freebsd-lab-font-weight-bold);
   letter-spacing: 0.05em;
 }
 
 .freebsdLab-FooterText,
 .freebsdLab-Notice {
-  margin: 8px 0 0;
-  color: #777;
-  font-size: 9px;
-  line-height: 1.45;
+  margin: var(--freebsd-lab-space-2) 0 0;
+  color: var(--freebsd-lab-text-subdued);
+  font-size: var(--freebsd-lab-font-size-xs);
+  line-height: var(--freebsd-lab-line-height-normal);
 }
 
 .freebsdLab-Notice {
-  color: #333;
+  color: var(--freebsd-lab-text-secondary);
   overflow-wrap: anywhere;
 }
 
 .freebsdLab-Loading,
 .freebsdLab-Error {
-  padding: 16px 14px;
-  color: #777;
-  font-size: 10px;
+  padding: var(--freebsd-lab-space-4) 14px;
+  color: var(--freebsd-lab-text-subdued);
+  font-size: var(--freebsd-lab-font-size-sm);
   line-height: 1.5;
 }
 
 .freebsdLab-Error {
-  color: #a20e16;
+  color: var(--freebsd-lab-text-error);
 }
 
 /* -------------------------------------------------------------------------- */
-/* Bottom FreeBSD status rail                                                  */
+/* Section 9: Bottom FreeBSD Status Rail                                      */
 /* -------------------------------------------------------------------------- */
 
 body.freebsdLab-ReferenceShell #jp-bottom-panel {
@@ -783,7 +909,7 @@ body.freebsdLab-ReferenceShell #jp-bottom-panel {
   max-height: 34px !important;
   background: var(--freebsd-lab-status) !important;
   border-top: 0 !important;
-  color: #fff;
+  color: var(--freebsd-lab-text-on-dark);
 }
 
 body.freebsdLab-ReferenceShell #jp-bottom-panel > .lm-Widget:not(.freebsdLab-StatusBar) {
@@ -798,12 +924,12 @@ body.freebsdLab-ReferenceShell #jp-bottom-panel > .lm-Widget:not(.freebsdLab-Sta
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   align-items: center;
-  gap: 12px;
+  gap: var(--freebsd-lab-space-3);
   padding: 0 11px;
   background: var(--freebsd-lab-status);
-  color: #fff;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
-  font-size: 10px;
+  color: var(--freebsd-lab-text-on-dark);
+  font-family: var(--freebsd-lab-font-sans);
+  font-size: var(--freebsd-lab-font-size-sm);
 }
 
 .freebsdLab-StatusLeft,
@@ -816,7 +942,7 @@ body.freebsdLab-ReferenceShell #jp-bottom-panel > .lm-Widget:not(.freebsdLab-Sta
 
 .freebsdLab-StatusLeft {
   justify-content: flex-start;
-  gap: 8px;
+  gap: var(--freebsd-lab-space-2);
 }
 
 .freebsdLab-StatusRight {
@@ -826,15 +952,15 @@ body.freebsdLab-ReferenceShell #jp-bottom-panel > .lm-Widget:not(.freebsdLab-Sta
 }
 
 .freebsdLab-StatusSimple {
-  font-weight: 650;
+  font-weight: var(--freebsd-lab-font-weight-semibold);
 }
 
 .freebsdLab-StatusToggle {
   position: relative;
   width: 25px;
   height: 13px;
-  border: 1px solid rgb(255 255 255 / 80%);
-  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.8);
+  border-radius: var(--freebsd-lab-radius-lg);
 }
 
 .freebsdLab-StatusToggleKnob {
@@ -843,8 +969,8 @@ body.freebsdLab-ReferenceShell #jp-bottom-panel > .lm-Widget:not(.freebsdLab-Sta
   top: 2px;
   width: 7px;
   height: 7px;
-  border-radius: 50%;
-  background: #fff;
+  border-radius: var(--freebsd-lab-radius-full);
+  background: var(--freebsd-lab-text-on-dark);
 }
 
 .freebsdLab-StatusMetric,
@@ -859,39 +985,36 @@ body.freebsdLab-ReferenceShell #jp-bottom-panel > .lm-Widget:not(.freebsdLab-Sta
 .freebsdLab-StatusBrand {
   justify-content: center;
   gap: 7px;
-  font-family: Georgia, "Times New Roman", serif;
+  font-family: var(--freebsd-lab-font-serif);
 }
 
 .freebsdLab-StatusBrandMark {
-  font-size: 14px;
+  font-size: var(--freebsd-lab-font-size-xl);
 }
 
 .freebsdLab-StatusBrandName {
-  font-size: 12px;
-  font-weight: 600;
+  font-size: var(--freebsd-lab-font-size-md);
+  font-weight: var(--freebsd-lab-font-weight-semibold);
 }
 
 .freebsdLab-StatusBrandTagline {
   padding-left: 7px;
-  border-left: 1px solid rgb(255 255 255 / 45%);
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
-  font-size: 9px;
+  border-left: 1px solid rgba(255, 255, 255, 0.45);
+  font-family: var(--freebsd-lab-font-sans);
+  font-size: var(--freebsd-lab-font-size-xs);
 }
 
 /* -------------------------------------------------------------------------- */
-/* Narrow viewport fallback                                                    */
+/* Section 10: Responsive & Viewport Adaptations                              */
 /* -------------------------------------------------------------------------- */
 
 @media (max-width: 1100px) {
   .freebsdLab-Tagline,
+  .freebsdLab-BrandDivider,
   .freebsdLab-MastheadSubtitle,
   .freebsdLab-StatusBrandTagline,
   .freebsdLab-StatusPosition {
     display: none;
-  }
-
-  .freebsdLab-BrandDivider {
-    margin-right: 0;
   }
 
   body.freebsdLab-ReferenceShell #jp-left-stack,
@@ -910,7 +1033,7 @@ body.freebsdLab-ReferenceShell #jp-bottom-panel > .lm-Widget:not(.freebsdLab-Sta
   }
 
   body.freebsdLab-ReferenceShell .freebsdLab-NotebookPanel .jp-Notebook-cell {
-    padding-left: 24px;
-    padding-right: 24px;
+    padding-left: var(--freebsd-lab-space-6);
+    padding-right: var(--freebsd-lab-space-6);
   }
 }
