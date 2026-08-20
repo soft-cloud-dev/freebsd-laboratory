@@ -5,7 +5,7 @@
   "license": "BSD-2-Clause",
   "main": "lib/index.js",
   "types": "lib/index.d.ts",
-  "style": "style/index.css",
+  "style": "style/shell-fidelity.css",
   "scripts": {
     "build": "npm run build:lib && npm run build:labextension",
     "build:lib": "tsc",
