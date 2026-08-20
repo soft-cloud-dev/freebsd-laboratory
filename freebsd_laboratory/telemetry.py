@@ -55,7 +55,7 @@ def _before_send(event: dict[str, Any], hint: dict[str, Any]) -> dict[str, Any]:
     return redacted
 
 
-def init_sentry(component: str) -> bool:
+def init_sentry(component: str, *, debug: bool = False) -> bool:
     """Initialize Sentry when SENTRY_DSN is explicitly configured."""
     dsn = os.getenv("SENTRY_DSN")
     if not dsn or sentry_sdk is None:
@@ -73,6 +73,7 @@ def init_sentry(component: str) -> bool:
             max_request_body_size="never",
             traces_sample_rate=None,
             before_send=_before_send,
+            debug=debug,
         )
 
     with sentry_sdk.new_scope() as scope:
