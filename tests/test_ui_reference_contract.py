@@ -7,6 +7,8 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SOURCE = REPO_ROOT / "labextension/src/index.ts"
 STYLE = REPO_ROOT / "labextension/style/index.css"
+SHELL_STYLE = REPO_ROOT / "labextension/style/shell-fidelity.css"
+PACKAGE = REPO_ROOT / "labextension/package.json"
 NOTEBOOK = REPO_ROOT / "notebooks/Intro.ipynb"
 KERNEL = REPO_ROOT / "freebsd_laboratory/kernels/freebsd-python/kernel.json"
 
@@ -34,6 +36,20 @@ def test_reference_geometry_and_brand_rails_are_preserved() -> None:
     assert ".freebsdLab-IntroCard" in style
     assert ".freebsdLab-StatusBar" in style
     assert "--freebsd-lab-red: #b31b21" in style
+
+
+def test_shell_fidelity_overrides_are_loaded_and_lock_split_geometry() -> None:
+    package = json.loads(PACKAGE.read_text(encoding="utf-8"))
+    style = SHELL_STYLE.read_text(encoding="utf-8")
+
+    assert package["style"] == "style/shell-fidelity.css"
+    assert "@import url('./index.css');" in style
+    assert "#jp-main-split-panel" in style
+    assert "inset: 0 271px 0 326px !important" in style
+    assert "> .jp-SideArea[data-side='left']" in style
+    assert "> .jp-SideArea[data-side='right']" in style
+    assert "> .lm-SplitPanel-handle" in style
+    assert "#jp-bottom-panel > .freebsdLab-StatusBar" in style
 
 
 def test_intro_notebook_contains_reference_hero() -> None:
