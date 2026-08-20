@@ -1,0 +1,173 @@
+@import url('./index.css');
+
+/*
+ * Screenshot-fidelity corrections for the JupyterLab 4.6 shell.
+ *
+ * The upstream shell restores horizontal SplitPanel relative sizes from the
+ * workspace. Those restored coordinates can leave a large blank region when
+ * this extension applies fixed visual widths to the side areas. Lock the
+ * three children of #jp-main-split-panel to the reference geometry instead of
+ * combining restored splitter coordinates with fixed child widths.
+ */
+
+body.freebsdLab-ReferenceShell #jp-main-split-panel {
+  position: relative !important;
+  overflow: hidden !important;
+}
+
+body.freebsdLab-ReferenceShell
+  #jp-main-split-panel
+  > .jp-SideArea[data-side='left'] {
+  position: absolute !important;
+  inset: 0 auto 0 0 !important;
+  width: 325px !important;
+  min-width: 325px !important;
+  max-width: 325px !important;
+  height: auto !important;
+}
+
+body.freebsdLab-ReferenceShell #jp-main-dock-panel {
+  position: absolute !important;
+  inset: 0 271px 0 326px !important;
+  width: auto !important;
+  min-width: 0 !important;
+  max-width: none !important;
+  height: auto !important;
+  padding: 0 !important;
+}
+
+body.freebsdLab-ReferenceShell
+  #jp-main-split-panel
+  > .jp-SideArea[data-side='right'] {
+  position: absolute !important;
+  inset: 0 0 0 auto !important;
+  width: 270px !important;
+  min-width: 270px !important;
+  max-width: 270px !important;
+  height: auto !important;
+}
+
+body.freebsdLab-ReferenceShell #jp-main-split-panel > .lm-SplitPanel-handle {
+  display: none !important;
+}
+
+body.freebsdLab-ReferenceShell #jp-left-stack,
+body.freebsdLab-ReferenceShell #jp-right-stack {
+  width: 100% !important;
+  min-width: 0 !important;
+  max-width: none !important;
+}
+
+body.freebsdLab-ReferenceShell #jp-right-stack > .freebsdLab-Progression {
+  width: 100% !important;
+  min-width: 0 !important;
+  max-width: none !important;
+}
+
+/* Let the notebook use the recovered center column instead of retaining the
+ * narrow visual rhythm produced by the broken splitter allocation. */
+body.freebsdLab-ReferenceShell .freebsdLab-NotebookPanel,
+body.freebsdLab-ReferenceShell .freebsdLab-NotebookPanel .jp-Notebook,
+body.freebsdLab-ReferenceShell .freebsdLab-NotebookPanel .jp-NotebookPanel-notebook {
+  min-width: 0 !important;
+  width: 100% !important;
+}
+
+body.freebsdLab-ReferenceShell .freebsdLab-NotebookPanel .jp-Notebook-cell {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 1040px;
+  margin-left: auto;
+  margin-right: auto;
+  padding-left: 48px;
+  padding-right: 48px;
+}
+
+/* Prevent toolbar controls from falling into the content-header rail when the
+ * workspace is restored from a previously narrow dock allocation. */
+body.freebsdLab-ReferenceShell .freebsdLab-NotebookPanel .jp-NotebookPanel-toolbar {
+  flex-wrap: nowrap !important;
+  overflow: hidden !important;
+}
+
+body.freebsdLab-ReferenceShell .freebsdLab-NotebookPanel .jp-Toolbar-item {
+  flex: 0 0 auto;
+}
+
+body.freebsdLab-ReferenceShell .freebsdLab-NotebookPath {
+  position: relative !important;
+  z-index: 1;
+  width: 100% !important;
+  min-height: 28px !important;
+  max-height: 28px !important;
+  display: flex !important;
+  align-items: center;
+  padding: 0 12px !important;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Make the bottom rail occupy exactly one row and keep its content visible. */
+body.freebsdLab-ReferenceShell #jp-bottom-panel {
+  min-height: 34px !important;
+  max-height: 34px !important;
+  height: 34px !important;
+  overflow: hidden !important;
+}
+
+body.freebsdLab-ReferenceShell #jp-bottom-panel > .freebsdLab-StatusBar {
+  position: relative !important;
+  inset: auto !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  min-height: 34px !important;
+  max-height: 34px !important;
+  height: 34px !important;
+  flex: 1 1 auto !important;
+  display: grid !important;
+}
+
+@media (max-width: 1100px) {
+  body.freebsdLab-ReferenceShell
+    #jp-main-split-panel
+    > .jp-SideArea[data-side='left'] {
+    width: 265px !important;
+    min-width: 265px !important;
+    max-width: 265px !important;
+  }
+
+  body.freebsdLab-ReferenceShell #jp-main-dock-panel {
+    inset: 0 251px 0 266px !important;
+  }
+
+  body.freebsdLab-ReferenceShell
+    #jp-main-split-panel
+    > .jp-SideArea[data-side='right'] {
+    width: 250px !important;
+    min-width: 250px !important;
+    max-width: 250px !important;
+  }
+
+  body.freebsdLab-ReferenceShell .freebsdLab-NotebookPanel .jp-Notebook-cell {
+    padding-left: 28px;
+    padding-right: 28px;
+  }
+}
+
+@media (max-width: 820px) {
+  body.freebsdLab-ReferenceShell
+    #jp-main-split-panel
+    > .jp-SideArea[data-side='right'] {
+    display: none !important;
+  }
+
+  body.freebsdLab-ReferenceShell #jp-main-dock-panel {
+    right: 0 !important;
+  }
+
+  body.freebsdLab-ReferenceShell .freebsdLab-NotebookPanel .jp-Notebook-cell {
+    padding-left: 18px;
+    padding-right: 18px;
+  }
+}
