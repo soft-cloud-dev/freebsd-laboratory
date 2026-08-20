@@ -1,45 +1,662 @@
-.freebsdLab-Progression {
-  background: var(--jp-layout-color1);
-  color: var(--jp-ui-font-color1);
-  min-width: 290px;
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-  font-family: var(--jp-ui-font-family);
+body.freebsdLab-ReferenceShell {
+  --freebsd-lab-red: #b31b21;
+  --freebsd-lab-red-dark: #970d14;
+  --freebsd-lab-red-soft: #fff3f3;
+  --freebsd-lab-blue: #1479c9;
+  --freebsd-lab-border: #d8d8d8;
+  --freebsd-lab-muted: #666;
+  --freebsd-lab-black: #050505;
+  --freebsd-lab-status: #a70b12;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
 }
 
-.freebsdLab-Progression > .lm-Widget {
-  min-height: 0;
+/* -------------------------------------------------------------------------- */
+/* Application frame                                                           */
+/* -------------------------------------------------------------------------- */
+
+body.freebsdLab-ReferenceShell #jp-header-panel {
+  min-height: 80px !important;
+  max-height: 80px !important;
+  background: var(--freebsd-lab-black);
+  border-bottom: 1px solid var(--freebsd-lab-red);
+  overflow: hidden;
+}
+
+.freebsdLab-Masthead {
+  box-sizing: border-box;
+  position: relative;
+  isolation: isolate;
+  width: 100%;
+  min-height: 80px;
+  max-height: 80px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 28px 0 18px;
+  overflow: hidden;
+  background: #050505;
+  color: #fff;
+}
+
+.freebsdLab-Masthead::after {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  width: 1200px;
+  height: 1200px;
+  right: -345px;
+  top: -1119px;
+  border: 6px solid #c3151d;
+  border-radius: 50%;
+  pointer-events: none;
+}
+
+.freebsdLab-MastheadBrand,
+.freebsdLab-MastheadJupyter {
+  display: flex;
+  align-items: center;
+}
+
+.freebsdLab-MastheadBrand {
+  min-width: 0;
+  height: 100%;
+}
+
+.freebsdLab-BrandMark {
+  width: 45px;
+  height: 45px;
+  margin-right: 14px;
+  flex: 0 0 45px;
+}
+
+.freebsdLab-BrandMark svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.freebsdLab-Wordmark {
+  color: #fff;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 36px;
+  font-weight: 400;
+  line-height: 1;
+  letter-spacing: -1.4px;
+  white-space: nowrap;
+}
+
+.freebsdLab-BrandDivider {
+  width: 1px;
+  height: 39px;
+  margin: 0 20px;
+  background: #858585;
+  opacity: 0.8;
+}
+
+.freebsdLab-Tagline {
+  color: #f1f1f1;
+  font-size: 17px;
+  font-weight: 300;
+  white-space: nowrap;
+}
+
+.freebsdLab-MastheadJupyter {
+  position: relative;
+  z-index: 2;
+  flex-direction: column;
+  align-items: flex-end;
+  margin-right: 10px;
+  text-align: right;
+}
+
+.freebsdLab-MastheadTitle {
+  color: #fff;
+  font-size: 23px;
+  font-weight: 650;
+  line-height: 1.05;
+}
+
+.freebsdLab-MastheadSubtitle {
+  margin-top: 4px;
+  color: #d8d8d8;
+  font-size: 12px;
+  font-weight: 400;
+  white-space: nowrap;
+}
+
+body.freebsdLab-ReferenceShell #jp-top-panel {
+  position: relative;
+  box-sizing: border-box;
+  min-height: 43px !important;
+  max-height: 43px !important;
+  padding-left: 49px;
+  background: #fff !important;
+  border-bottom: 1px solid #d2d2d2;
+}
+
+body.freebsdLab-ReferenceShell #jp-top-panel::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 49px;
+  height: 43px;
+  border-right: 1px solid #d2d2d2;
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: 27px 27px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'%3E%3Cpath d='M8 17a13 13 0 0 1 24 0' fill='none' stroke='%23f37726' stroke-width='3.2' stroke-linecap='round'/%3E%3Cpath d='M32 23a13 13 0 0 1-24 0' fill='none' stroke='%23f37726' stroke-width='3.2' stroke-linecap='round'/%3E%3Ccircle cx='10' cy='8' r='2.2' fill='%23666666'/%3E%3Ccircle cx='31' cy='31' r='2.2' fill='%23666666'/%3E%3Ccircle cx='33' cy='9' r='1.7' fill='%23999999'/%3E%3C/svg%3E");
+}
+
+body.freebsdLab-ReferenceShell #jp-menu-panel {
+  min-height: 42px !important;
+  background: #fff !important;
+  box-shadow: none !important;
+}
+
+body.freebsdLab-ReferenceShell #jp-menu-panel .lm-MenuBar {
+  height: 42px;
+  padding-left: 6px;
+  background: #fff;
+}
+
+body.freebsdLab-ReferenceShell #jp-menu-panel .lm-MenuBar-item {
+  padding: 0 10px;
+  color: #202020;
+  font-size: 14px;
+  line-height: 42px;
+}
+
+body.freebsdLab-ReferenceShell #jp-title-panel {
+  display: none !important;
+}
+
+body.freebsdLab-ReferenceShell #jp-main-content-panel,
+body.freebsdLab-ReferenceShell #jp-main-vsplit-panel,
+body.freebsdLab-ReferenceShell #jp-main-split-panel,
+body.freebsdLab-ReferenceShell #jp-main-dock-panel {
+  background: #fff;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Left browser / activity rail                                                */
+/* -------------------------------------------------------------------------- */
+
+body.freebsdLab-ReferenceShell .jp-SideBar.jp-mod-left {
+  box-sizing: border-box;
+  width: 49px !important;
+  min-width: 49px !important;
+  max-width: 49px !important;
+  background: #fff;
+  border-right: 1px solid #d2d2d2;
+}
+
+body.freebsdLab-ReferenceShell .jp-SideBar.jp-mod-left .lm-TabBar-tab {
+  min-height: 48px;
+  color: #4b4b4b;
+}
+
+body.freebsdLab-ReferenceShell .jp-SideBar.jp-mod-left .lm-TabBar-tab.jp-mod-current,
+body.freebsdLab-ReferenceShell .jp-SideBar.jp-mod-left .lm-TabBar-tab.lm-mod-current {
+  box-shadow: inset 3px 0 0 var(--freebsd-lab-red);
+  color: var(--freebsd-lab-red);
+}
+
+body.freebsdLab-ReferenceShell #jp-left-stack {
+  box-sizing: border-box;
+  width: 325px !important;
+  min-width: 325px !important;
+  max-width: 325px !important;
+  border-right: 1px solid #cfcfcf;
+  background: #fff;
+}
+
+body.freebsdLab-ReferenceShell .jp-FileBrowser {
+  min-width: 0 !important;
+  background: #fff;
+}
+
+body.freebsdLab-ReferenceShell .jp-FileBrowser-toolbar {
+  min-height: 43px;
+  padding: 4px 7px;
+  border-bottom: 1px solid #dedede;
+  background: #fff;
+}
+
+body.freebsdLab-ReferenceShell .jp-FileBrowser-filterBox {
+  margin: 7px 8px 5px;
+}
+
+body.freebsdLab-ReferenceShell .jp-FileBrowser-filterBox input {
+  min-height: 29px;
+  border: 1px solid #bfc5ca;
+  border-radius: 1px;
+  background: #fff;
+  font-size: 12px;
+}
+
+body.freebsdLab-ReferenceShell .jp-FileBrowser-breadcrumbs {
+  min-height: 35px;
+  padding: 0 10px;
+  border-bottom: 1px solid #ddd;
+  color: #3d3d3d;
+  font-size: 12px;
+}
+
+body.freebsdLab-ReferenceShell .jp-DirListing-header {
+  min-height: 28px;
+  background: #f7f7f7;
+  border-bottom: 1px solid #d7d7d7;
+  color: #555;
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+body.freebsdLab-ReferenceShell .jp-DirListing-item {
+  min-height: 27px;
+  color: #222;
+  font-size: 12px;
+}
+
+body.freebsdLab-ReferenceShell .jp-DirListing-item.jp-mod-selected {
+  background: #1477c7 !important;
+  color: #fff !important;
+}
+
+body.freebsdLab-ReferenceShell .jp-DirListing-item.jp-mod-selected .jp-DirListing-itemText,
+body.freebsdLab-ReferenceShell .jp-DirListing-item.jp-mod-selected .jp-DirListing-itemModified {
+  color: #fff !important;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Main document tabs and notebook chrome                                      */
+/* -------------------------------------------------------------------------- */
+
+body.freebsdLab-ReferenceShell #jp-main-dock-panel > .lm-DockPanel-tabBar,
+body.freebsdLab-ReferenceShell #jp-main-dock-panel .lm-DockPanel-tabBar {
+  min-height: 41px;
+  max-height: 41px;
+  background: #f8f8f8;
+  border-bottom: 1px solid #d4d4d4;
+}
+
+body.freebsdLab-ReferenceShell #jp-main-dock-panel .lm-TabBar-tab {
+  box-sizing: border-box;
+  min-height: 40px;
+  padding: 0 15px;
+  border-right: 1px solid #dedede;
+  background: #f8f8f8;
+  color: #303030;
+  font-size: 13px;
+}
+
+body.freebsdLab-ReferenceShell #jp-main-dock-panel .lm-TabBar-tab.lm-mod-current,
+body.freebsdLab-ReferenceShell #jp-main-dock-panel .lm-TabBar-tab.jp-mod-current {
+  border-top: 3px solid var(--freebsd-lab-blue);
+  background: #fff;
+}
+
+body.freebsdLab-ReferenceShell .freebsdLab-NotebookPanel {
+  background: #fff;
+}
+
+body.freebsdLab-ReferenceShell .freebsdLab-NotebookPanel .jp-NotebookPanel-toolbar {
+  box-sizing: border-box;
+  min-height: 46px;
+  max-height: 46px;
+  padding: 7px 10px;
+  border-bottom: 1px solid #d3d3d3;
+  background: #fff;
+  box-shadow: none;
+}
+
+body.freebsdLab-ReferenceShell .jp-NotebookPanel-toolbar .jp-Toolbar-item {
+  min-height: 28px;
+}
+
+body.freebsdLab-ReferenceShell .jp-NotebookPanel-toolbar .jp-ToolbarButtonComponent {
+  border-radius: 2px;
+}
+
+.freebsdLab-ExportButton.jp-ToolbarButtonComponent {
+  min-height: 29px;
+  margin-left: auto !important;
+  padding: 0 12px;
+  border: 1px solid var(--freebsd-lab-red) !important;
+  border-radius: 2px !important;
+  background: var(--freebsd-lab-red) !important;
+  color: #fff !important;
+  box-shadow: none !important;
+}
+
+.freebsdLab-ExportButton.jp-ToolbarButtonComponent:hover {
+  background: var(--freebsd-lab-red-dark) !important;
+}
+
+.freebsdLab-ExportButton .jp-ToolbarButtonComponent-label {
+  color: #fff !important;
+  font-size: 11px;
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.freebsdLab-NotebookPath {
+  box-sizing: border-box;
+  min-height: 26px;
+  max-height: 26px;
+  padding: 6px 12px 5px;
+  border-bottom: 1px solid #dedede;
+  background: #fafafa;
+  color: #777;
+  font-family: var(--jp-code-font-family, monospace);
+  font-size: 10px;
+  line-height: 14px;
+}
+
+body.freebsdLab-ReferenceShell .freebsdLab-NotebookPanel .jp-Notebook {
+  background: #fff;
+}
+
+body.freebsdLab-ReferenceShell .freebsdLab-NotebookPanel .jp-Notebook-cell {
+  box-sizing: border-box;
+  padding-left: 43px;
+  padding-right: 43px;
+}
+
+body.freebsdLab-ReferenceShell .freebsdLab-NotebookPanel .jp-Cell.jp-mod-selected,
+body.freebsdLab-ReferenceShell .freebsdLab-NotebookPanel .jp-Cell.jp-mod-active {
+  border: 0 !important;
+  outline: 0 !important;
+  box-shadow: inset 3px 0 0 var(--freebsd-lab-blue) !important;
+}
+
+body.freebsdLab-ReferenceShell .freebsdLab-NotebookPanel .jp-Cell.jp-mod-selected .jp-InputArea-editor,
+body.freebsdLab-ReferenceShell .freebsdLab-NotebookPanel .jp-Cell.jp-mod-active .jp-InputArea-editor {
+  border-color: #d5d5d5 !important;
+  outline: 0 !important;
+  box-shadow: none !important;
+}
+
+body.freebsdLab-ReferenceShell .freebsdLab-NotebookPanel .jp-MarkdownOutput {
+  color: #1d1d1d;
+  font-size: 13px;
+}
+
+body.freebsdLab-ReferenceShell .freebsdLab-NotebookPanel .jp-MarkdownOutput h2 {
+  margin: 20px 0 4px;
+  color: #161616;
+  font-size: 20px;
+  font-weight: 650;
+  line-height: 1.25;
+}
+
+body.freebsdLab-ReferenceShell .freebsdLab-NotebookPanel .jp-MarkdownOutput h2 + p {
+  margin-top: 0;
+  color: #555;
+  font-size: 12px;
+}
+
+body.freebsdLab-ReferenceShell .freebsdLab-NotebookPanel .jp-CodeCell .jp-InputArea-editor {
+  border: 1px solid #d5d5d5;
+  border-radius: 0;
+  background: #f5f5f5;
+}
+
+body.freebsdLab-ReferenceShell .freebsdLab-NotebookPanel .jp-CodeCell .cm-editor,
+body.freebsdLab-ReferenceShell .freebsdLab-NotebookPanel .jp-CodeCell .cm-scroller {
+  background: #f5f5f5;
+  font-size: 11px;
+}
+
+body.freebsdLab-ReferenceShell .freebsdLab-NotebookPanel .jp-InputPrompt,
+body.freebsdLab-ReferenceShell .freebsdLab-NotebookPanel .jp-OutputPrompt {
+  color: #1768b1;
+  font-family: var(--jp-code-font-family, monospace);
+  font-size: 10px;
+}
+
+body.freebsdLab-ReferenceShell .freebsdLab-NotebookPanel .jp-OutputArea-output {
+  color: #222;
+  font-size: 11px;
+}
+
+/* Introductory design card */
+
+body.freebsdLab-ReferenceShell .freebsdLab-IntroCell {
+  padding-top: 22px;
+  padding-bottom: 8px;
+}
+
+body.freebsdLab-ReferenceShell .freebsdLab-IntroCell .jp-InputPrompt {
+  display: none;
+}
+
+body.freebsdLab-ReferenceShell .freebsdLab-IntroCell .jp-Cell-inputWrapper {
+  padding-left: 0;
+}
+
+.freebsdLab-IntroCard {
+  box-sizing: border-box;
+  width: 100%;
+  margin: 0;
+  padding: 20px 22px 18px;
+  border: 1px solid #cecece;
+  border-radius: 2px;
+  background: #fff;
+  box-shadow: 0 1px 1px rgb(0 0 0 / 4%);
+}
+
+.freebsdLab-IntroBrand {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 9px;
+  color: #555;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 11px;
+}
+
+.freebsdLab-IntroBrand::before {
+  content: "";
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  background: var(--freebsd-lab-red);
+  box-shadow: -5px -5px 0 -3px var(--freebsd-lab-red), 5px -5px 0 -3px var(--freebsd-lab-red);
+}
+
+.freebsdLab-IntroTitle {
+  margin: 0 !important;
+  color: #191919 !important;
+  font-size: 30px !important;
+  font-weight: 400 !important;
+  line-height: 1.12 !important;
+  letter-spacing: -0.5px;
+}
+
+.freebsdLab-IntroTagline {
+  margin: 8px 0 12px !important;
+  color: var(--freebsd-lab-red) !important;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 15px !important;
+  font-style: italic;
+}
+
+.freebsdLab-IntroCopy {
+  max-width: 740px;
+  margin: 0 0 17px !important;
+  color: #454545 !important;
+  font-size: 12px !important;
+  line-height: 1.55 !important;
+}
+
+.freebsdLab-IntroNotice {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  min-height: 72px;
+  padding: 11px 14px;
+  border: 1px solid #d48286;
+  border-left: 4px solid var(--freebsd-lab-red);
+  background: var(--freebsd-lab-red-soft);
+}
+
+.freebsdLab-IntroNoticeIcon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 27px;
+  height: 27px;
+  border: 1px solid var(--freebsd-lab-red);
+  border-radius: 50%;
+  color: var(--freebsd-lab-red);
+  font-family: Georgia, serif;
+  font-size: 18px;
+  font-style: italic;
+  font-weight: 700;
+}
+
+.freebsdLab-IntroNoticeLabel {
+  margin-bottom: 3px;
+  color: #4a4a4a;
+  font-size: 9px;
+  font-weight: 750;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+.freebsdLab-IntroNoticeText {
+  max-width: 670px;
+  color: #4c4c4c;
+  font-size: 10px;
+  line-height: 1.45;
+}
+
+.freebsdLab-IntroNoticeMeta {
+  padding-left: 18px;
+  border-left: 1px solid #e1b1b3;
+  color: #555;
+  font-size: 10px;
+  line-height: 1.35;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.freebsdLab-IntroNoticeMeta strong {
+  display: block;
+  color: var(--freebsd-lab-red);
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Right progression panel                                                     */
+/* -------------------------------------------------------------------------- */
+
+body.freebsdLab-ReferenceShell .jp-SideBar.jp-mod-right {
+  display: none !important;
+  width: 0 !important;
+  min-width: 0 !important;
+  max-width: 0 !important;
+}
+
+body.freebsdLab-ReferenceShell #jp-right-stack {
+  box-sizing: border-box;
+  width: 270px !important;
+  min-width: 270px !important;
+  max-width: 270px !important;
+  border-left: 1px solid #d0d0d0;
+  background: #fff;
+}
+
+.freebsdLab-Progression {
+  box-sizing: border-box;
+  width: 270px;
+  min-width: 270px;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: #fff;
+  color: #222;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
+}
+
+.freebsdLab-ProgressHeader {
+  box-sizing: border-box;
+  min-height: 42px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 10px 0 12px;
+  border-bottom: 1px solid #d3d3d3;
+  background: #fafafa;
+}
+
+.freebsdLab-ProgressHeaderTitle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #202020;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.freebsdLab-ProgressHeaderMark {
+  color: var(--freebsd-lab-red);
+  font-size: 15px;
+}
+
+.freebsdLab-ProgressClose {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #555;
+  font-size: 18px;
+  line-height: 22px;
+  cursor: pointer;
+}
+
+.freebsdLab-ProgressClose:hover {
+  color: #111;
+  background: #ededed;
 }
 
 .freebsdLab-Body {
   flex: 1 1 auto;
+  min-height: 0;
   overflow: auto;
 }
 
 .freebsdLab-Section {
-  padding: 18px 14px;
-  border-bottom: 1px solid var(--jp-border-color2);
+  padding: 17px 14px;
+  border-bottom: 1px solid #dedede;
 }
 
 .freebsdLab-Eyebrow {
   margin-bottom: 9px;
-  color: var(--jp-ui-font-color2);
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.09em;
+  color: #777;
+  font-size: 8px;
+  font-weight: 750;
+  letter-spacing: 0.12em;
   text-transform: uppercase;
 }
 
 .freebsdLab-PathTitle {
   margin-bottom: 5px;
-  font-size: 13px;
+  color: #202020;
+  font-size: 12px;
   font-weight: 700;
 }
 
 .freebsdLab-Muted {
-  color: var(--jp-ui-font-color2);
-  font-size: 11px;
+  color: #737373;
+  font-size: 10px;
   line-height: 1.45;
 }
 
@@ -50,117 +667,247 @@
 }
 
 .freebsdLab-Stage {
+  min-height: 34px;
   display: flex;
   align-items: center;
-  min-height: 35px;
-  gap: 10px;
-  color: var(--jp-ui-font-color2);
-  font-size: 12px;
+  gap: 9px;
+  color: #777;
+  font-size: 11px;
 }
 
 .freebsdLab-StageMarker {
   box-sizing: border-box;
-  width: 20px;
-  height: 20px;
-  border: 1px solid var(--jp-border-color2);
-  border-radius: 50%;
+  width: 19px;
+  height: 19px;
+  flex: 0 0 19px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  flex: 0 0 20px;
-  font-size: 10px;
+  border: 1px solid #c8c8c8;
+  border-radius: 50%;
+  background: #fff;
+  color: #888;
+  font-size: 9px;
   line-height: 1;
 }
 
 .freebsdLab-Stage.is-complete {
-  color: var(--jp-ui-font-color1);
-  font-weight: 600;
+  color: #272727;
+  font-weight: 650;
 }
 
 .freebsdLab-Stage.is-complete .freebsdLab-StageMarker {
-  border-color: #a71318;
-  background: #a71318;
+  border-color: var(--freebsd-lab-red);
+  background: var(--freebsd-lab-red);
   color: #fff;
 }
 
 .freebsdLab-Facts {
-  border-bottom: 1px solid var(--jp-border-color2);
+  border-bottom: 1px solid #dedede;
 }
 
 .freebsdLab-Fact {
   display: grid;
-  grid-template-columns: 1fr 1.25fr;
-  gap: 12px;
+  grid-template-columns: 0.9fr 1.4fr;
+  gap: 10px;
+  align-items: start;
   padding: 10px 14px;
 }
 
 .freebsdLab-FactLabel {
-  color: var(--jp-ui-font-color2);
-  font-size: 9px;
-  font-weight: 700;
+  color: #777;
+  font-size: 8px;
+  font-weight: 750;
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
 
 .freebsdLab-FactValue {
+  color: #303030;
+  font-size: 10px;
+  font-weight: 650;
+  line-height: 1.35;
   text-align: right;
-  font-size: 11px;
-  font-weight: 600;
   overflow-wrap: anywhere;
 }
 
 .freebsdLab-Footer {
   flex: 0 0 auto;
-  padding: 14px;
-  border-top: 1px solid var(--jp-border-color2);
+  padding: 13px 14px 16px;
+  border-top: 1px solid #dedede;
+  background: #fff;
 }
 
 .freebsdLab-Attestation {
   display: inline-block;
-  border: 1px solid #a71318;
-  color: #a71318;
-  padding: 3px 6px;
-  font-size: 9px;
-  font-weight: 700;
-  letter-spacing: 0.04em;
+  padding: 2px 5px;
+  border: 1px solid var(--freebsd-lab-red);
+  color: var(--freebsd-lab-red);
+  font-size: 8px;
+  font-weight: 750;
+  letter-spacing: 0.05em;
 }
 
 .freebsdLab-FooterText,
 .freebsdLab-Notice {
-  margin: 9px 0 0;
-  color: var(--jp-ui-font-color2);
-  font-size: 10px;
+  margin: 8px 0 0;
+  color: #777;
+  font-size: 9px;
   line-height: 1.45;
 }
 
 .freebsdLab-Notice {
-  color: var(--jp-ui-font-color1);
+  color: #333;
   overflow-wrap: anywhere;
 }
 
 .freebsdLab-Loading,
 .freebsdLab-Error {
   padding: 16px 14px;
-  color: var(--jp-ui-font-color2);
-  font-size: 11px;
+  color: #777;
+  font-size: 10px;
   line-height: 1.5;
 }
 
 .freebsdLab-Error {
-  color: var(--jp-error-color1);
+  color: #a20e16;
 }
 
-.freebsdLab-ExportButton.jp-ToolbarButtonComponent {
-  border: 1px solid #a71318;
-  background: #a71318;
+/* -------------------------------------------------------------------------- */
+/* Bottom FreeBSD status rail                                                  */
+/* -------------------------------------------------------------------------- */
+
+body.freebsdLab-ReferenceShell #jp-bottom-panel {
+  min-height: 34px !important;
+  max-height: 34px !important;
+  background: var(--freebsd-lab-status) !important;
+  border-top: 0 !important;
   color: #fff;
-  border-radius: 2px;
-  min-height: 26px;
-  padding: 0 10px;
 }
 
-.freebsdLab-ExportButton .jp-ToolbarButtonComponent-label {
+body.freebsdLab-ReferenceShell #jp-bottom-panel > .lm-Widget:not(.freebsdLab-StatusBar) {
+  display: none !important;
+}
+
+.freebsdLab-StatusBar {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 34px;
+  max-height: 34px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  padding: 0 11px;
+  background: var(--freebsd-lab-status);
   color: #fff;
-  font-size: 11px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
+  font-size: 10px;
+}
+
+.freebsdLab-StatusLeft,
+.freebsdLab-StatusRight,
+.freebsdLab-StatusBrand {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+}
+
+.freebsdLab-StatusLeft {
+  justify-content: flex-start;
+  gap: 8px;
+}
+
+.freebsdLab-StatusRight {
+  justify-content: flex-end;
+  gap: 14px;
+  white-space: nowrap;
+}
+
+.freebsdLab-StatusSimple {
+  font-weight: 650;
+}
+
+.freebsdLab-StatusToggle {
+  position: relative;
+  width: 25px;
+  height: 13px;
+  border: 1px solid rgb(255 255 255 / 80%);
+  border-radius: 8px;
+}
+
+.freebsdLab-StatusToggleKnob {
+  position: absolute;
+  left: 2px;
+  top: 2px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #fff;
+}
+
+.freebsdLab-StatusMetric,
+.freebsdLab-StatusRuntime,
+.freebsdLab-StatusMode,
+.freebsdLab-StatusPosition,
+.freebsdLab-StatusNotebook,
+.freebsdLab-StatusBell {
+  opacity: 0.96;
+}
+
+.freebsdLab-StatusBrand {
+  justify-content: center;
+  gap: 7px;
+  font-family: Georgia, "Times New Roman", serif;
+}
+
+.freebsdLab-StatusBrandMark {
+  font-size: 14px;
+}
+
+.freebsdLab-StatusBrandName {
+  font-size: 12px;
   font-weight: 600;
+}
+
+.freebsdLab-StatusBrandTagline {
+  padding-left: 7px;
+  border-left: 1px solid rgb(255 255 255 / 45%);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
+  font-size: 9px;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Narrow viewport fallback                                                    */
+/* -------------------------------------------------------------------------- */
+
+@media (max-width: 1100px) {
+  .freebsdLab-Tagline,
+  .freebsdLab-MastheadSubtitle,
+  .freebsdLab-StatusBrandTagline,
+  .freebsdLab-StatusPosition {
+    display: none;
+  }
+
+  .freebsdLab-BrandDivider {
+    margin-right: 0;
+  }
+
+  body.freebsdLab-ReferenceShell #jp-left-stack {
+    width: 265px !important;
+    min-width: 265px !important;
+    max-width: 265px !important;
+  }
+
+  body.freebsdLab-ReferenceShell #jp-right-stack,
+  .freebsdLab-Progression {
+    width: 250px !important;
+    min-width: 250px !important;
+    max-width: 250px !important;
+  }
+
+  body.freebsdLab-ReferenceShell .freebsdLab-NotebookPanel .jp-Notebook-cell {
+    padding-left: 24px;
+    padding-right: 24px;
+  }
 }

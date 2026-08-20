@@ -6,7 +6,7 @@
     "-f",
     "{connection_file}"
   ],
-  "display_name": "FreeBSD (Python 3, VNET jail)",
+  "display_name": "FreeBSD (Python 3)",
   "language": "python",
   "interrupt_mode": "message",
   "metadata": {
