@@ -28,3 +28,5 @@ def test_golden_images_derive_python_flavor_from_python3() -> None:
     assert "vm_refresh_ldconfig()" in vm_config
     assert 'chroot "${DESTDIR}" /etc/rc.d/ldconfig onestart || return 1' in vm_config
     assert vm_config.count("vm_refresh_ldconfig || return 1") == 2
+    assert "vm_create_base()" in vm_config
+    assert 'mkdir -p "${DESTDIR}/usr/local/lib" || return 1' in vm_config
