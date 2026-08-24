@@ -29,15 +29,20 @@ class IPv4LeasePool:
     def _lease_path(self, address: ipaddress.IPv4Address) -> Path:
         return self.lease_dir / f"{address}.lease"
 
+    def _open_lock(self):
+        lock_path = self.lease_dir / ".lock"
+        if lock_path.is_symlink():
+            lock_path.unlink(missing_ok=True)
+        flags = os.O_RDWR | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0)
+        descriptor = os.open(lock_path, flags, 0o600)
+        return os.fdopen(descriptor, "a+", encoding="utf-8")
+
     def allocate(self, owner: str) -> str:
         if not isinstance(owner, str) or not owner:
             raise ValueError("Lease owner must be a non-empty string")
         self.lease_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
-        lock_path = self.lease_dir / ".lock"
-        if lock_path.is_symlink():
-            lock_path.unlink(missing_ok=True)
         with _IPV4_POOL_THREAD_LOCK:
-            with lock_path.open("a+", encoding="utf-8") as lock:
+            with self._open_lock() as lock:
                 fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
                 try:
                     for value in range(int(self.start), int(self.end) + 1):
@@ -78,11 +83,8 @@ class IPv4LeasePool:
         if parsed not in self.network or int(parsed) < int(self.start) or int(parsed) > int(self.end):
             return False
         self.lease_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
-        lock_path = self.lease_dir / ".lock"
-        if lock_path.is_symlink():
-            lock_path.unlink(missing_ok=True)
         with _IPV4_POOL_THREAD_LOCK:
-            with lock_path.open("a+", encoding="utf-8") as lock:
+            with self._open_lock() as lock:
                 fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
                 try:
                     lease_path = self._lease_path(parsed)
@@ -105,11 +107,8 @@ class IPv4LeasePool:
         if not self.lease_dir.exists():
             return []
         removed: list[str] = []
-        lock_path = self.lease_dir / ".lock"
-        if lock_path.is_symlink():
-            lock_path.unlink(missing_ok=True)
         with _IPV4_POOL_THREAD_LOCK:
-            with lock_path.open("a+", encoding="utf-8") as lock:
+            with self._open_lock() as lock:
                 fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
                 try:
                     for lease_path in self.lease_dir.glob("*.lease"):
