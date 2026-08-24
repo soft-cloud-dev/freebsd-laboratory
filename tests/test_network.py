@@ -18,21 +18,24 @@ def make_pool(tmp_path: Path) -> IPv4LeasePool:
 
 
 @pytest.mark.skipif(not hasattr(os, "O_NOFOLLOW"), reason="O_NOFOLLOW is unavailable")
-def test_allocate_refuses_symlink_lock(tmp_path: Path) -> None:
+def test_allocate_replaces_symlink_lock_without_touching_target(tmp_path: Path) -> None:
     pool = make_pool(tmp_path)
     pool.lease_dir.mkdir(parents=True)
     target = tmp_path / "target"
     target.write_text("unchanged", encoding="utf-8")
-    (pool.lease_dir / ".lock").symlink_to(target)
+    lock_path = pool.lease_dir / ".lock"
+    lock_path.symlink_to(target)
 
-    with pytest.raises(OSError):
-        pool.allocate("freebsd-lab-test")
+    address = pool.allocate("freebsd-lab-test")
 
+    assert address == "172.31.254.10"
     assert target.read_text(encoding="utf-8") == "unchanged"
+    assert lock_path.exists()
+    assert not lock_path.is_symlink()
 
 
 @pytest.mark.skipif(not hasattr(os, "O_NOFOLLOW"), reason="O_NOFOLLOW is unavailable")
-def test_release_refuses_symlink_lock(tmp_path: Path) -> None:
+def test_release_replaces_symlink_lock_without_touching_target(tmp_path: Path) -> None:
     pool = make_pool(tmp_path)
     address = pool.allocate("freebsd-lab-test")
     lock_path = pool.lease_dir / ".lock"
@@ -41,8 +44,7 @@ def test_release_refuses_symlink_lock(tmp_path: Path) -> None:
     target.write_text("unchanged", encoding="utf-8")
     lock_path.symlink_to(target)
 
-    with pytest.raises(OSError):
-        pool.release(address, "freebsd-lab-test")
-
+    assert pool.release(address, "freebsd-lab-test") is True
     assert target.read_text(encoding="utf-8") == "unchanged"
-    assert pool._lease_path(pool.start).exists()
+    assert lock_path.exists()
+    assert not lock_path.is_symlink()
