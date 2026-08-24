@@ -26,7 +26,7 @@ LAB_FAIL_ON_PKG_AUDIT=${LAB_FAIL_ON_PKG_AUDIT:-YES}
 VM_IMAGE_CONFIG=${VM_IMAGE_CONFIG:-${SCRIPT_DIR}/vmimage.conf}
 LAB_SSHD_POLICY=${LAB_SSHD_POLICY:-${SCRIPT_DIR}/sshd-freebsd-lab.conf}
 
-for command in git make sha256 install grep; do
+for command in git make sha256 install grep mount umount rm; do
     if ! command -v "$command" >/dev/null 2>&1; then
         echo "Required command is unavailable: $command" >&2
         exit 1
@@ -56,6 +56,31 @@ SOURCE_BRANCH=$(git -C "$SRC_DIR" rev-parse --abbrev-ref HEAD)
 
 mkdir -p "$OBJ_ROOT" "$OUTPUT_DIR"
 OBJDIR=$(env MAKEOBJDIRPREFIX="$OBJ_ROOT" make -C "${SRC_DIR}/release" -V .OBJDIR)
+case "$OBJDIR" in
+    /*) ;;
+    *)
+        echo "Release object directory must be absolute: $OBJDIR" >&2
+        exit 1
+        ;;
+esac
+if [ "$OBJDIR" = "/" ]; then
+    echo "Refusing to use filesystem root as release object directory" >&2
+    exit 1
+fi
+
+VM_TARGET="${OBJDIR}/vm-image"
+VM_STAGE="${OBJDIR}/vm-image-raw-ufs"
+VM_INTERMEDIATE="${OBJDIR}/raw.ufs.img"
+SOURCE_IMAGE="${OBJDIR}/freebsd-python.ufs.raw"
+
+if mount | grep -F " on ${VM_STAGE}/dev " >/dev/null 2>&1; then
+    if ! umount "${VM_STAGE}/dev"; then
+        echo "Unable to unmount stale VM staging devfs: ${VM_STAGE}/dev" >&2
+        exit 1
+    fi
+fi
+rm -rf "$VM_STAGE"
+rm -f "$VM_TARGET" "$VM_INTERMEDIATE" "$SOURCE_IMAGE"
 
 set -- \
     env \
@@ -84,7 +109,6 @@ fi
     VM_IMAGE_CONFIG="$VM_IMAGE_CONFIG" \
     vm-image
 
-SOURCE_IMAGE="${OBJDIR}/freebsd-python.ufs.raw"
 if [ ! -f "$SOURCE_IMAGE" ]; then
     echo "Expected customized release image was not produced: $SOURCE_IMAGE" >&2
     exit 1
