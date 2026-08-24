@@ -32,3 +32,16 @@ def test_direct_bhyve_build_discards_only_stale_vm_image_state() -> None:
     assert 'rm -rf "$VM_STAGE"' in bhyve
     assert 'rm -f "$VM_TARGET" "$VM_INTERMEDIATE" "$SOURCE_IMAGE"' in bhyve
     assert 'rm -rf "$OBJ_ROOT"' not in bhyve
+
+
+def test_direct_bhyve_build_recovers_incomplete_pkgbase_repository() -> None:
+    bhyve = BHYVE_BUILDER.read_text(encoding="utf-8")
+
+    assert 'PKGBASE_REPO="${OBJDIR}/pkgbase-repo"' in bhyve
+    assert 'PKGBASE_CONFIG_DIR="${OBJDIR}/pkgbase-repo-dir"' in bhyve
+    assert "pkgbase_repo_has_catalog()" in bhyve
+    assert "-name packagesite.pkg -o -name packagesite.txz" in bhyve
+    assert 'rm -rf "$PKGBASE_REPO" "$PKGBASE_CONFIG_DIR"' in bhyve
+    assert 'rm -rf "$PKGBASE_CONFIG_DIR"' in bhyve
+    assert 'file://${PKGBASE_REPO}/' in bhyve
+    assert 'rm -rf "$OBJ_ROOT"' not in bhyve

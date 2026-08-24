@@ -26,7 +26,7 @@ LAB_FAIL_ON_PKG_AUDIT=${LAB_FAIL_ON_PKG_AUDIT:-YES}
 VM_IMAGE_CONFIG=${VM_IMAGE_CONFIG:-${SCRIPT_DIR}/vmimage.conf}
 LAB_SSHD_POLICY=${LAB_SSHD_POLICY:-${SCRIPT_DIR}/sshd-freebsd-lab.conf}
 
-for command in git make sha256 install grep mount umount rm; do
+for command in git make sha256 install grep find mount umount rm; do
     if ! command -v "$command" >/dev/null 2>&1; then
         echo "Required command is unavailable: $command" >&2
         exit 1
@@ -72,6 +72,35 @@ VM_TARGET="${OBJDIR}/vm-image"
 VM_STAGE="${OBJDIR}/vm-image-raw-ufs"
 VM_INTERMEDIATE="${OBJDIR}/raw.ufs.img"
 SOURCE_IMAGE="${OBJDIR}/freebsd-python.ufs.raw"
+PKGBASE_REPO="${OBJDIR}/pkgbase-repo"
+PKGBASE_CONFIG_DIR="${OBJDIR}/pkgbase-repo-dir"
+PKGBASE_CONFIG="${PKGBASE_CONFIG_DIR}/FreeBSD-base.conf"
+
+pkgbase_repo_has_catalog()
+{
+    [ -d "$PKGBASE_REPO" ] || return 1
+    find "$PKGBASE_REPO" -type f \
+        \( -name packagesite.pkg -o -name packagesite.txz \) \
+        -print -quit 2>/dev/null | grep -q .
+}
+
+if [ -d "$PKGBASE_REPO" ]; then
+    if ! pkgbase_repo_has_catalog; then
+        printf 'Discarding incomplete FreeBSD pkgbase repository: %s\n' "$PKGBASE_REPO"
+        rm -rf "$PKGBASE_REPO" "$PKGBASE_CONFIG_DIR"
+    fi
+elif [ -e "$PKGBASE_CONFIG_DIR" ]; then
+    printf 'Discarding stale FreeBSD pkgbase repository configuration: %s\n' "$PKGBASE_CONFIG_DIR"
+    rm -rf "$PKGBASE_CONFIG_DIR"
+fi
+
+if [ -d "$PKGBASE_CONFIG_DIR" ]; then
+    if [ ! -f "$PKGBASE_CONFIG" ] || \
+        ! grep -Fq "file://${PKGBASE_REPO}/" "$PKGBASE_CONFIG"; then
+        printf 'Discarding invalid FreeBSD pkgbase repository configuration: %s\n' "$PKGBASE_CONFIG_DIR"
+        rm -rf "$PKGBASE_CONFIG_DIR"
+    fi
+fi
 
 if mount | grep -F " on ${VM_STAGE}/dev " >/dev/null 2>&1; then
     if ! umount "${VM_STAGE}/dev"; then
