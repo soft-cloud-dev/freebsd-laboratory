@@ -83,11 +83,11 @@ cd /path/to/freebsd-laboratory
 sudo env SRC_DIR=/usr/src deploy/freebsd/images/build-golden-images.sh
 ```
 
-The wrapper builds world/kernel first, then creates both runtime artifacts from the same source revision and build id. Set `SKIP_SOURCE_BUILD=YES` only when the matching world/kernel have already been built from that exact source tree.
+The wrapper uses one object root (`OBJ_ROOT`, defaulting to `/var/tmp/freebsd-laboratory-vm-<build-id>`) for `buildworld`, `buildkernel`, the source jail installation, and `vm-image`; no phase may use a different `MAKEOBJDIRPREFIX`. Set `SKIP_SOURCE_BUILD=YES` only when that same `OBJ_ROOT` already contains matching world/kernel output from the exact source tree.
 
 ## Package source
 
-The runtime package set is deliberately small. Bootstrap normally supplies the Python package names that match the host's Python version. Direct builder use can override `LAB_JAIL_PACKAGES` or `LAB_VM_PACKAGES`.
+The runtime package set is deliberately small. Builders install the repository's `python3` meta-package, then derive the matching `pyXY-ipykernel` (and, for bhyve, `pyXY-cloud-init`) package from that interpreter inside the target image. This avoids pinning a retired Python package flavor. Direct builder use can override `LAB_JAIL_PACKAGES`, `LAB_JAIL_IPYKERNEL_PACKAGE`, `LAB_VM_PACKAGES`, `LAB_VM_IPYKERNEL_PACKAGE`, or `LAB_VM_CLOUD_INIT_PACKAGE`.
 
 For controlled package provenance, point `LAB_PKG_REPOS_DIR` at a root-owned directory containing pkg repository configuration files for the laboratory's Poudriere repository. If it is unset, the host's normal pkg repository configuration is used.
 

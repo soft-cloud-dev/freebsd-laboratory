@@ -16,7 +16,8 @@ LAB_JAIL_IMAGE_MODE=${LAB_JAIL_IMAGE_MODE:-release}
 BUILD_ID=${BUILD_ID:-$(date -u +%Y%m%dT%H%M%SZ)}
 JAIL_DATASET_PREFIX=${JAIL_DATASET_PREFIX:-zroot/jails/templates/freebsd-python-${LAB_JAIL_IMAGE_MODE}}
 JAIL_MOUNT_ROOT=${JAIL_MOUNT_ROOT:-/usr/local/jails/templates}
-LAB_JAIL_PACKAGES=${LAB_JAIL_PACKAGES:-"python311 py311-ipykernel"}
+LAB_JAIL_PACKAGES=${LAB_JAIL_PACKAGES:-python3}
+LAB_JAIL_IPYKERNEL_PACKAGE=${LAB_JAIL_IPYKERNEL_PACKAGE:-}
 LAB_PKG_REPOS_DIR=${LAB_PKG_REPOS_DIR:-}
 LAB_FAIL_ON_PKG_AUDIT=${LAB_FAIL_ON_PKG_AUDIT:-YES}
 LAB_PKG_AUDIT_ALLOWED_VULN_IDS=${LAB_PKG_AUDIT_ALLOWED_VULN_IDS-}
@@ -269,6 +270,13 @@ printf 'Target jail package ABI: %s\n' "$TARGET_ABI"
 
 pkg_root update -f
 pkg_root install -y $LAB_JAIL_PACKAGES
+
+if [ -z "$LAB_JAIL_IPYKERNEL_PACKAGE" ]; then
+    LAB_JAIL_PYTHON_TAG=$(chroot "$ROOT" /usr/local/bin/python3 -c \
+        'import sys; print(f"py{sys.version_info.major}{sys.version_info.minor}")')
+    LAB_JAIL_IPYKERNEL_PACKAGE="${LAB_JAIL_PYTHON_TAG}-ipykernel"
+fi
+pkg_root install -y "$LAB_JAIL_IPYKERNEL_PACKAGE"
 
 if ! pw -R "$ROOT" usershow freebsd >/dev/null 2>&1; then
     pw -R "$ROOT" useradd freebsd -m -s /bin/sh -w no

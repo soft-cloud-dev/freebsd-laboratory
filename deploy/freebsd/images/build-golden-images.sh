@@ -14,6 +14,7 @@ SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 SRC_DIR=${SRC_DIR:-/usr/src}
 BUILD_ID=${BUILD_ID:-$(date -u +%Y%m%dT%H%M%SZ)}
 JOBS=${JOBS:-$(sysctl -n hw.ncpu)}
+OBJ_ROOT=${OBJ_ROOT:-/var/tmp/freebsd-laboratory-vm-${BUILD_ID}}
 SKIP_SOURCE_BUILD=${SKIP_SOURCE_BUILD:-NO}
 REQUIRE_RELENG_SOURCE=${REQUIRE_RELENG_SOURCE:-YES}
 ALLOW_DIRTY_SOURCE=${ALLOW_DIRTY_SOURCE:-NO}
@@ -46,15 +47,19 @@ fi
 
 printf 'Golden image build id: %s\n' "$BUILD_ID"
 printf 'FreeBSD source: %s (%s)\n' "$SOURCE_BRANCH" "$SOURCE_REVISION"
+printf 'FreeBSD object root: %s\n' "$OBJ_ROOT"
 
 if [ "$SKIP_SOURCE_BUILD" != "YES" ]; then
-    make -C "$SRC_DIR" -j "$JOBS" buildworld buildkernel
+    env MAKEOBJDIRPREFIX="$OBJ_ROOT" \
+        make -C "$SRC_DIR" -j "$JOBS" buildworld buildkernel
 fi
 
-BUILD_ID="$BUILD_ID" SRC_DIR="$SRC_DIR" LAB_JAIL_IMAGE_MODE=source \
+BUILD_ID="$BUILD_ID" SRC_DIR="$SRC_DIR" OBJ_ROOT="$OBJ_ROOT" \
+    MAKEOBJDIRPREFIX="$OBJ_ROOT" LAB_JAIL_IMAGE_MODE=source \
     "${SCRIPT_DIR}/build-jail-template.sh"
 
-BUILD_ID="$BUILD_ID" SRC_DIR="$SRC_DIR" \
+BUILD_ID="$BUILD_ID" SRC_DIR="$SRC_DIR" OBJ_ROOT="$OBJ_ROOT" \
+    MAKEOBJDIRPREFIX="$OBJ_ROOT" \
     "${SCRIPT_DIR}/build-bhyve-image.sh"
 
 printf '%s\n' "Golden image rebuild completed."
