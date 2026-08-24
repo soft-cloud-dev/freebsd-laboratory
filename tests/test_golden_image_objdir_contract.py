@@ -19,3 +19,16 @@ def test_paired_golden_build_uses_one_object_root() -> None:
     assert 'OBJ_ROOT=${OBJ_ROOT:-/var/tmp/freebsd-laboratory-vm-${BUILD_ID}}' in bhyve
     assert 'MAKEOBJDIRPREFIX="$OBJ_ROOT"' in bhyve
 
+
+def test_direct_bhyve_build_discards_only_stale_vm_image_state() -> None:
+    bhyve = BHYVE_BUILDER.read_text(encoding="utf-8")
+
+    assert 'VM_TARGET="${OBJDIR}/vm-image"' in bhyve
+    assert 'VM_STAGE="${OBJDIR}/vm-image-raw-ufs"' in bhyve
+    assert 'VM_INTERMEDIATE="${OBJDIR}/raw.ufs.img"' in bhyve
+    assert 'SOURCE_IMAGE="${OBJDIR}/freebsd-python.ufs.raw"' in bhyve
+    assert 'mount | grep -F " on ${VM_STAGE}/dev "' in bhyve
+    assert 'umount "${VM_STAGE}/dev"' in bhyve
+    assert 'rm -rf "$VM_STAGE"' in bhyve
+    assert 'rm -f "$VM_TARGET" "$VM_INTERMEDIATE" "$SOURCE_IMAGE"' in bhyve
+    assert 'rm -rf "$OBJ_ROOT"' not in bhyve
