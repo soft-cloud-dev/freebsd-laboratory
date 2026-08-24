@@ -31,6 +31,8 @@ class IPv4LeasePool:
 
     def _open_lock(self):
         lock_path = self.lease_dir / ".lock"
+        if lock_path.is_symlink():
+            lock_path.unlink(missing_ok=True)
         flags = os.O_RDWR | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0)
         descriptor = os.open(lock_path, flags, 0o600)
         return os.fdopen(descriptor, "a+", encoding="utf-8")
