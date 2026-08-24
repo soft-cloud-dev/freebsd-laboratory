@@ -83,7 +83,7 @@ cd /path/to/freebsd-laboratory
 sudo env SRC_DIR=/usr/src deploy/freebsd/images/build-golden-images.sh
 ```
 
-The wrapper builds world/kernel first, then creates both runtime artifacts from the same source revision and build id. Set `SKIP_SOURCE_BUILD=YES` only when the matching world/kernel have already been built from that exact source tree.
+The wrapper uses one object root (`OBJ_ROOT`, defaulting to `/var/tmp/freebsd-laboratory-vm-<build-id>`) for `buildworld`, `buildkernel`, the source jail installation, and `vm-image`; no phase may use a different `MAKEOBJDIRPREFIX`. Set `SKIP_SOURCE_BUILD=YES` only when that same `OBJ_ROOT` already contains matching world/kernel output from the exact source tree.
 
 ## Package source
 
