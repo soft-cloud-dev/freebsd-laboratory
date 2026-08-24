@@ -26,7 +26,7 @@ def test_golden_images_derive_python_flavor_from_python3() -> None:
     assert 'LAB_VM_CLOUD_INIT_PACKAGE="${LAB_VM_PYTHON_TAG}-cloud-init"' in vm_config
     assert 'install -y "${LAB_VM_IPYKERNEL_PACKAGE}" "${LAB_VM_CLOUD_INIT_PACKAGE}"' in vm_config
     assert "vm_refresh_ldconfig()" in vm_config
-    assert 'chroot "${DESTDIR}" /etc/rc.d/ldconfig onestart || return 1' in vm_config
+    assert 'chroot "${DESTDIR}" /etc/rc.d/ldconfig forcestart || return 1' in vm_config
     assert vm_config.count("vm_refresh_ldconfig || return 1") == 2
     assert "vm_create_base()" in vm_config
     assert 'mkdir -p "${DESTDIR}/usr/local/lib" || return 1' in vm_config
