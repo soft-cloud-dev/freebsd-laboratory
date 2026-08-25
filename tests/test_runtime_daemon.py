@@ -343,6 +343,7 @@ def test_create_bhyve_zvol_clone_backend(
     flattened = [" ".join(c) for c in commands_run]
     assert any("zfs clone zroot/vm/.zvol/freebsd-python@ready zroot/vm/freebsd-lab-clone1/disk0" in cmd for cmd in flattened)
     assert any("/bin/true create -t freebsd-lab -C" in cmd and "-i" not in cmd for cmd in flattened)
+    assert any("arp -d 172.31.254.10" in cmd for cmd in flattened)
 
 
 def test_create_bhyve_memdisk_backend(
@@ -468,6 +469,7 @@ def test_destroy_cleans_up_md_unit_and_dataset(
     flattened = [" ".join(c) for c in commands_run]
     assert any("mdconfig -d -u 5" in cmd for cmd in flattened)
     assert any(f"zfs destroy -r -f zroot/vm/{name}" in cmd for cmd in flattened)
+    assert any("arp -d 172.31.254.10" in cmd for cmd in flattened)
 
 
 def test_ping_reports_capabilities_and_profiles(tmp_path: Path) -> None:

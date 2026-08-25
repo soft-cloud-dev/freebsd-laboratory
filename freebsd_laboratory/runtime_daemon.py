@@ -479,6 +479,7 @@ class RuntimeManager:
         self._ensure_bridge()
         jail_root = str((Path(self.config.jail_mount_root) / name).resolve())
         address = self._allocate(name)
+        self._run(["arp", "-d", address], check=False)
         record: dict[str, Any] = {
             "schema": "softcloud.runtime/v1",
             "name": name,
@@ -609,6 +610,7 @@ class RuntimeManager:
             raise RuntimeError(f"Refusing to replace existing vm-bhyve guest: {name}")
 
         address = self._allocate(name)
+        self._run(["arp", "-d", address], check=False)
         record: dict[str, Any] = {
             "schema": "softcloud.runtime/v1",
             "name": name,
@@ -865,6 +867,7 @@ class RuntimeManager:
         guest_ip = record.get("guest_ip")
         if isinstance(guest_ip, str) and guest_ip:
             self.pool.release(guest_ip, name)
+            self._run(["arp", "-d", guest_ip], check=False)
         self._delete_registry(name)
         return {"name": name, "removed": removed}
 
@@ -996,6 +999,8 @@ class RuntimeManager:
         released_addresses = (
             self.pool.clear_orphans(active_owners) if requester_uid == 0 else []
         )
+        for address in released_addresses:
+            self._run(["arp", "-d", address], check=False)
         return {
             "cleaned": sorted(set(cleaned)),
             "retained": sorted(active_owners),
