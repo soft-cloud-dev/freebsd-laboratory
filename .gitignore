@@ -18,5 +18,6 @@ labextension/package-lock.json
 npm-debug.log*
 
 # Multi-agent and teamwork run logs
-.agents/
+.agents/*
+!.agents/skills/
 ORIGINAL_REQUEST.md

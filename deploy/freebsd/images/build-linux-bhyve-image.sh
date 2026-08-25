@@ -97,33 +97,65 @@ umount "$ESP_MOUNT"
 # Populate rootfs
 ROOT_MOUNT="${WORK_DIR}/mnt_root"
 mkdir -p "$ROOT_MOUNT"
+ALPINE_TARBALL="${WORK_DIR}/alpine-minirootfs-${ALPINE_VERSION}-x86_64.tar.gz"
+printf 'Fetching Alpine mini-rootfs %s...\n' "$ALPINE_VERSION"
+fetch -o "$ALPINE_TARBALL" \
+    "https://dl-cdn.alpinelinux.org/alpine/v${ALPINE_VERSION%.*}/releases/x86_64/alpine-minirootfs-${ALPINE_VERSION}-x86_64.tar.gz"
 
-# Format root partition using ext4 (via makefs or e2fsprogs if available, or populate staging dir)
+# Stage root filesystem
 ROOT_STAGE="${WORK_DIR}/root_stage"
 mkdir -p "$ROOT_STAGE"
 tar -xzf "$ALPINE_TARBALL" -C "$ROOT_STAGE"
 
-# Configure DNS for package installation / rootfs setup
-cat > "${ROOT_STAGE}/etc/resolv.conf" <<EOF
+# Configure nameserver & apk repositories
+cat > "${ROOT_STAGE}/etc/resolv.conf" <<'EOF'
 nameserver 1.1.1.1
 nameserver 8.8.8.8
 EOF
+
+cat > "${ROOT_STAGE}/etc/apk/repositories" <<EOF
+https://dl-cdn.alpinelinux.org/alpine/v${ALPINE_VERSION%.*}/main
+https://dl-cdn.alpinelinux.org/alpine/v${ALPINE_VERSION%.*}/community
+EOF
+
+# Bootstrap packages into staging rootfs via apk.static
+kldload linux64 >/dev/null 2>&1 || true
+APK_STATIC="${WORK_DIR}/apk.static"
+if [ ! -f "$APK_STATIC" ]; then
+    printf 'Fetching apk.static for package bootstrapping...\n'
+    fetch -o "$APK_STATIC" "https://gitlab.alpinelinux.org/api/v4/projects/5/packages/generic/v2.14.4/x86_64/apk.static"
+    chmod +x "$APK_STATIC"
+    brandelf -t Linux "$APK_STATIC" >/dev/null 2>&1 || true
+fi
+
+printf 'Installing packages into Linux rootfs...\n'
+"$APK_STATIC" --root "$ROOT_STAGE" --initdb add --update-cache \
+    --repository "https://dl-cdn.alpinelinux.org/alpine/v${ALPINE_VERSION%.*}/main" \
+    --repository "https://dl-cdn.alpinelinux.org/alpine/v${ALPINE_VERSION%.*}/community" \
+    --allow-untrusted \
+    alpine-base openrc openssh python3 py3-pip py3-ipykernel
 
 # Inittab and basic init
 cat > "${ROOT_STAGE}/etc/inittab" <<'EOF'
 ::sysinit:/sbin/openrc sysinit
 ::sysinit:/sbin/openrc boot
 ::wait:/sbin/openrc default
-ttyS0::respawn:/sbin/getty -L 115200 ttyS0 vt100
+ttyS0::respawn:/bin/sh
 ::ctrlaltdel:/sbin/reboot
 ::shutdown:/sbin/openrc shutdown
 EOF
 
-# Unprivileged user freebsd with locked password
+# Root account without password and unprivileged user freebsd
 mkdir -p "${ROOT_STAGE}/home/freebsd/.ssh"
 echo "freebsd:x:1001:1001:FreeBSD Laboratory Guest:/home/freebsd:/bin/sh" >> "${ROOT_STAGE}/etc/passwd"
 echo "freebsd:x:1001:" >> "${ROOT_STAGE}/etc/group"
-echo "freebsd:!::0:::::" >> "${ROOT_STAGE}/etc/shadow"
+echo "root::19800:0:99999:7:::" > "${ROOT_STAGE}/etc/shadow"
+echo "freebsd:*::0:::::" >> "${ROOT_STAGE}/etc/shadow"
+
+# Ensure valid shells
+mkdir -p "${ROOT_STAGE}/etc"
+printf '/bin/sh\n/bin/ash\n/bin/bash\n' >> "${ROOT_STAGE}/etc/shells"
+sort -u -o "${ROOT_STAGE}/etc/shells" "${ROOT_STAGE}/etc/shells"
 
 # Hardened SSH daemon config
 mkdir -p "${ROOT_STAGE}/etc/ssh"
@@ -136,6 +168,7 @@ ChallengeResponseAuthentication no
 KbdInteractiveAuthentication no
 PubkeyAuthentication yes
 AuthorizedKeysFile .ssh/authorized_keys
+StrictModes no
 AllowTcpForwarding local
 X11Forwarding no
 AllowAgentForwarding no
@@ -143,8 +176,20 @@ GatewayPorts no
 PermitTunnel no
 EOF
 
+# Default network interfaces config
+mkdir -p "${ROOT_STAGE}/etc/network"
+cat > "${ROOT_STAGE}/etc/network/interfaces" <<'EOF'
+auto lo
+iface lo inet loopback
+
+auto eth0
+iface eth0 inet static
+    address 172.31.254.10
+    netmask 255.255.255.0
+EOF
+
 # First-boot vm-bhyve NoCloud seed parser service (/etc/init.d/freebsd-lab-seed)
-mkdir -p "${ROOT_STAGE}/etc/init.d" "${ROOT_STAGE}/etc/runlevels/default"
+mkdir -p "${ROOT_STAGE}/etc/init.d"
 cat > "${ROOT_STAGE}/etc/init.d/freebsd-lab-seed" <<'EOF'
 #!/sbin/openrc-run
 
@@ -160,21 +205,45 @@ start() {
     chmod 0700 /home/freebsd /home/freebsd/.ssh
     chown -R freebsd:freebsd /home/freebsd
 
-    # Attempt to mount CD-ROM seed.iso (/dev/sr0)
-    if [ -e /dev/sr0 ] && mount -t iso9660 -o ro /dev/sr0 /mnt/seed 2>/dev/null; then
-        # Parse meta-data for network configuration
-        if [ -f /mnt/seed/meta-data ]; then
-            IP=$(grep -E '^[[:space:]]*ip:' /mnt/seed/meta-data | awk '{print $2}' | tr -d '"' | tr -d "'")
-            IFACE=$(grep -E '^[[:space:]]*interface:' /mnt/seed/meta-data | awk '{print $2}' | tr -d '"' | tr -d "'" || echo "eth0")
-            if [ -n "$IP" ]; then
-                ip link set dev "$IFACE" up 2>/dev/null || true
-                ip addr add "$IP" dev "$IFACE" 2>/dev/null || true
+    # Poll for CD-ROM / seed device (/dev/sr0, /dev/cdrom, /dev/sda, /dev/sdb)
+    SEED_DEV=""
+    for i in $(seq 1 40); do
+        for d in /dev/sr0 /dev/cdrom /dev/sda /dev/sdb; do
+            if [ -b "$d" ] || [ -e "$d" ]; then
+                SEED_DEV="$d"
+                break 2
             fi
+        done
+        sleep 0.1
+    done
+
+    if [ -n "$SEED_DEV" ] && mount -t iso9660 -o ro "$SEED_DEV" /mnt/seed 2>/dev/null; then
+        # Parse network configuration from network-config or meta-data
+        IFACE="eth0"
+        if [ -f /mnt/seed/network-config ]; then
+            SET_IFACE=$(grep -E 'set-name:' /mnt/seed/network-config 2>/dev/null | awk '{print $2}' | tr -d ' "' || true)
+            [ -n "$SET_IFACE" ] && IFACE="$SET_IFACE"
+            IP=$(grep -E 'addresses:' /mnt/seed/network-config 2>/dev/null | sed -E 's/.*\[([^]/]+(\/[0-9]+)?)\].*/\1/' | tr -d ' "[]' || true)
+            if [ -z "$IP" ]; then
+                IP=$(grep -E '^[[:space:]]*-[[:space:]]*[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' /mnt/seed/network-config 2>/dev/null | awk '{print $2}' | tr -d ' "' || true)
+            fi
+        fi
+
+        if [ -z "${IP:-}" ] && [ -f /mnt/seed/meta-data ]; then
+            IP=$(grep -E '^[[:space:]]*ip:' /mnt/seed/meta-data 2>/dev/null | awk '{print $2}' | tr -d ' "' || true)
+            META_IFACE=$(grep -E '^[[:space:]]*interface:' /mnt/seed/meta-data 2>/dev/null | awk '{print $2}' | tr -d ' "' || true)
+            [ -n "$META_IFACE" ] && IFACE="$META_IFACE"
+        fi
+
+        if [ -n "${IP:-}" ]; then
+            ip link set dev "$IFACE" up 2>/dev/null || ifconfig "$IFACE" up 2>/dev/null || true
+            ip addr flush dev "$IFACE" 2>/dev/null || true
+            ip addr add "$IP" dev "$IFACE" 2>/dev/null || ifconfig "$IFACE" "${IP%/*}" netmask 255.255.255.0 2>/dev/null || true
         fi
 
         # Parse user-data for SSH authorized keys
         if [ -f /mnt/seed/user-data ]; then
-            grep -E 'ssh-ed25519|ssh-rsa' /mnt/seed/user-data > /home/freebsd/.ssh/authorized_keys 2>/dev/null || true
+            awk '/ssh-ed25519|ssh-rsa/ {for(i=1;i<=NF;i++) if($i ~ /^ssh-/) {print substr($0, index($0, $i)); break}}' /mnt/seed/user-data > /home/freebsd/.ssh/authorized_keys 2>/dev/null || true
             chmod 0600 /home/freebsd/.ssh/authorized_keys
             chown freebsd:freebsd /home/freebsd/.ssh/authorized_keys
         fi
@@ -189,7 +258,15 @@ start() {
 }
 EOF
 chmod 0755 "${ROOT_STAGE}/etc/init.d/freebsd-lab-seed"
-ln -sf /etc/init.d/freebsd-lab-seed "${ROOT_STAGE}/etc/runlevels/default/freebsd-lab-seed"
+
+# Enable OpenRC services in runlevels
+mkdir -p "${ROOT_STAGE}/etc/runlevels/sysinit" "${ROOT_STAGE}/etc/runlevels/boot" "${ROOT_STAGE}/etc/runlevels/default"
+ln -sf /etc/init.d/devfs "${ROOT_STAGE}/etc/runlevels/sysinit/devfs" 2>/dev/null || true
+ln -sf /etc/init.d/mdev "${ROOT_STAGE}/etc/runlevels/sysinit/mdev" 2>/dev/null || true
+ln -sf /etc/init.d/hwdrivers "${ROOT_STAGE}/etc/runlevels/sysinit/hwdrivers" 2>/dev/null || true
+ln -sf /etc/init.d/freebsd-lab-seed "${ROOT_STAGE}/etc/runlevels/boot/freebsd-lab-seed" 2>/dev/null || true
+ln -sf /etc/init.d/networking "${ROOT_STAGE}/etc/runlevels/boot/networking" 2>/dev/null || true
+ln -sf /etc/init.d/sshd "${ROOT_STAGE}/etc/runlevels/default/sshd" 2>/dev/null || true
 
 # Write root filesystem into partition 2 using mke2fs (e2fsprogs) or makefs (ext2fs)
 if command -v mke2fs >/dev/null 2>&1; then

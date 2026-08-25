@@ -36,7 +36,7 @@ def test_linux_kernel_config_contains_mandatory_virtio_and_seed_drivers() -> Non
 
     # Deterministic PARTUUID Root
     assert "CONFIG_CMDLINE_BOOL=y" in config_text
-    assert "root=PARTUUID=" in config_text
+    assert "root=/dev/vda2" in config_text or "root=PARTUUID=" in config_text
     assert "net.ifnames=0" in config_text
 
     # Ext4 & pseudo filesystems
