@@ -174,6 +174,7 @@ X11Forwarding no
 AllowAgentForwarding no
 GatewayPorts no
 PermitTunnel no
+Subsystem sftp /usr/lib/ssh/sftp-server
 EOF
 
 # Default network interfaces config

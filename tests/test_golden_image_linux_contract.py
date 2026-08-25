@@ -68,6 +68,7 @@ def test_linux_bhyve_image_builder_contract() -> None:
     assert "ROOT_PARTUUID=" in image_text
     assert "freebsd:x:1001:1001" in image_text
     assert "AllowTcpForwarding local" in image_text
+    assert "Subsystem sftp /usr/lib/ssh/sftp-server" in image_text
     assert "seed.iso" in image_text
     assert "/dev/sr0" in image_text
     assert "/meta-data" in image_text

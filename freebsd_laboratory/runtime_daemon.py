@@ -378,9 +378,12 @@ class RuntimeManager:
                     self.config.vm_switch,
                 ]
             )
-        self._run(
-            [self.config.vm_command, "switch", "private", self.config.vm_switch, "on"]
-        )
+        # NOTE: Do NOT set "vm switch private ... on" here.
+        # The PRIVATE bridge member flag blocks the FreeBSD host itself from
+        # forwarding packets to VM tap ports, making SSH from host→guest
+        # impossible (ping: sendto: Permission denied). VM-to-VM isolation
+        # is enforced at L3 by the PF anchor (block in on labbridge0), so
+        # PRIVATE is redundant and breaks the SSH transport.
 
     def _allocate(self, name: str) -> str:
         address = self.pool.allocate(name)
@@ -520,7 +523,10 @@ class RuntimeManager:
             self._write_registry(record)
 
             self._run(["ifconfig", self.config.bridge_name, "addm", epair_host])
-            self._run(["ifconfig", self.config.bridge_name, "private", epair_host])
+            # NOTE: Do NOT set private on the epair host interface.
+            # Same reason as for bhyve taps: PRIVATE blocks the FreeBSD host
+            # from sending packets to the epair, making SSH into jails
+            # impossible. VM/jail-to-VM/jail isolation is enforced by PF.
             self._run(["ifconfig", epair_host, "up"])
 
             self._run(
