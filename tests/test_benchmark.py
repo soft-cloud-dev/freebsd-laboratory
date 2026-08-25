@@ -3,10 +3,8 @@ from __future__ import annotations
 import asyncio
 import csv
 import json
-import os
-import tempfile
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -15,8 +13,6 @@ from freebsd_laboratory.benchmark import (
     BenchmarkRunner,
     IterationResult,
     JupyterClientHelper,
-    MetricSummary,
-    RuntimeBenchmarkSummary,
     compute_metric_summary,
     format_csv_data,
     format_json_data,
