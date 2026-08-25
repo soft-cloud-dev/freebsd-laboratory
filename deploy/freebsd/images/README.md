@@ -110,6 +110,8 @@ Do not destroy an older snapshot while active ZFS clones still depend on it.
 
 The builder fails closed unless the selected FreeBSD source revision exposes `VM_IMAGE_CONFIG` in `release/Makefile.vm`. Without that support, `make vm-image` would ignore the laboratory customization file and could produce an apparently valid but unusable base image.
 
+FreeBSD's `vm-image` target bootstraps `pkg` from the ports tree while it prepares its pkgbase repository. Before starting the image build, this wrapper therefore requires a populated `${PORTSDIR:-/usr/ports}/ports-mgmt/pkg` directory. Set `PORTSDIR` when the ports checkout is not mounted at `/usr/ports`.
+
 Artifacts are versioned under `/var/db/freebsd-laboratory/images` by default:
 
 ```text

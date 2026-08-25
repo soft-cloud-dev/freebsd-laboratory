@@ -45,3 +45,12 @@ def test_direct_bhyve_build_recovers_incomplete_pkgbase_repository() -> None:
     assert 'rm -rf "$PKGBASE_CONFIG_DIR"' in bhyve
     assert 'file://${PKGBASE_REPO}/' in bhyve
     assert 'rm -rf "$OBJ_ROOT"' not in bhyve
+
+
+def test_direct_bhyve_build_requires_ports_pkg_bootstrap_source() -> None:
+    bhyve = BHYVE_BUILDER.read_text(encoding="utf-8")
+
+    assert 'PORTSDIR=${PORTSDIR:-/usr/ports}' in bhyve
+    assert '[ ! -f "${PORTSDIR}/ports-mgmt/pkg/Makefile" ]' in bhyve
+    assert 'FreeBSD ports tree with ports-mgmt/pkg is required at ${PORTSDIR}' in bhyve
+    assert 'PORTSDIR="$PORTSDIR"' in bhyve
