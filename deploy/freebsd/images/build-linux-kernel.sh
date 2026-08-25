@@ -12,7 +12,7 @@ KERNEL_CONFIG=${KERNEL_CONFIG:-${SCRIPT_DIR}/linux-kernel.config}
 LINUX_VERSION=${LINUX_VERSION:-6.6.78}
 LINUX_TARBALL="linux-${LINUX_VERSION}.tar.xz"
 LINUX_URL=${LINUX_URL:-https://cdn.kernel.org/pub/linux/kernel/v6.x/${LINUX_TARBALL}}
-LINUX_SHA256=${LINUX_SHA256:-c7f66a2e4e16d4826b158022718cbce4aaec0374e2d3b2f8a84594247547dfb4}
+LINUX_SHA256=${LINUX_SHA256:-5aa39a9bd555133ad741058f9908a277e6b36bb928481e747d885b50aaaa93ed}
 BUILD_ROOT=${BUILD_ROOT:-/var/tmp/freebsd-laboratory-linux-kernel}
 OUTPUT_DIR=${OUTPUT_DIR:-/var/db/freebsd-laboratory/images}
 
