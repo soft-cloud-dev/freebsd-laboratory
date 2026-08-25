@@ -21,7 +21,7 @@ ALPINE_URL=${ALPINE_URL:-https://dl-cdn.alpinelinux.org/alpine/v3.20/releases/x8
 ALPINE_SHA256=${ALPINE_SHA256:-0b5f134dcbc03006bb07c87c71e2ef64d7dfcbbf4ca4697ffcc960f274a496b8}
 
 KERNEL_EFI=${KERNEL_EFI:-}
-ROOT_PARTUUID="4b786f1e-02"
+ROOT_PARTUUID="4b786f1e-0000-0000-0000-000000000002"
 
 for cmd in truncate mdconfig gpart newfs_msdos sha256 fetch tar gzip; do
     if ! command -v "$cmd" >/dev/null 2>&1; then
@@ -81,7 +81,8 @@ gpart create -s gpt "$MD_DEV"
 # Partition 1: ESP (64MB)
 gpart add -t efi -s 64M -l efi-boot "$MD_DEV"
 # Partition 2: Root (ext4)
-gpart add -t linux-data -l linux-root "$MD_DEV"
+gpart add -t linux-data -l linux-root -i 2 "$MD_DEV"
+gpart modify -i 2 -u "$ROOT_PARTUUID" "$MD_DEV" 2>/dev/null || true
 
 # Format ESP as FAT32
 newfs_msdos -F 32 -c 1 "/dev/${MD_DEV}p1"
@@ -190,15 +191,20 @@ EOF
 chmod 0755 "${ROOT_STAGE}/etc/init.d/freebsd-lab-seed"
 ln -sf /etc/init.d/freebsd-lab-seed "${ROOT_STAGE}/etc/runlevels/default/freebsd-lab-seed"
 
-# If makefs / e2fs is available, write root filesystem directly to raw image partition
-if command -v makefs >/dev/null 2>&1; then
-    makefs -t msdos "${WORK_DIR}/esp.img" "${ESP_MOUNT}" 2>/dev/null || true
-fi
-
-# Write root filesystem into partition 2 using dd / makefs
-if command -v makefs >/dev/null 2>&1 && makefs -h 2>&1 | grep -q 'ext2fs'; then
+# Write root filesystem into partition 2 using mke2fs (e2fsprogs) or makefs (ext2fs)
+if command -v mke2fs >/dev/null 2>&1; then
+    mke2fs -t ext4 -d "$ROOT_STAGE" "/dev/${MD_DEV}p2"
+elif command -v makefs >/dev/null 2>&1 && makefs -h 2>&1 | grep -q 'ext2fs'; then
     makefs -t ext2fs -M 2g "${WORK_DIR}/root.ext4" "$ROOT_STAGE"
     dd if="${WORK_DIR}/root.ext4" of="/dev/${MD_DEV}p2" bs=1M status=none
+else
+    kldload ext2fs >/dev/null 2>&1 || true
+    if command -v mkfs.ext4 >/dev/null 2>&1; then
+        mkfs.ext4 -F "/dev/${MD_DEV}p2"
+        mount -t ext2fs "/dev/${MD_DEV}p2" "$ROOT_MOUNT"
+        cp -a "${ROOT_STAGE}/." "$ROOT_MOUNT/"
+        umount "$ROOT_MOUNT"
+    fi
 fi
 
 VERSIONED_IMAGE="${OUTPUT_DIR}/linux-python-${BUILD_ID}.raw"

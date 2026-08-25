@@ -44,14 +44,22 @@ if [ ! -d "$SOURCE_DIR" ]; then
 fi
 
 cd "$SOURCE_DIR"
+
+# FreeBSD host compatibility: ensure ELF relocation symbols exist for host tools
+if [ -f arch/x86/tools/relocs.h ] && ! grep -q 'R_X86_64_JUMP_SLOT' arch/x86/tools/relocs.h 2>/dev/null; then
+    printf '\n#ifndef R_X86_64_JUMP_SLOT\n#define R_X86_64_JUMP_SLOT 7\n#endif\n' >> arch/x86/tools/relocs.h
+fi
+
 cp "$KERNEL_CONFIG" .config
 
+HOST_FLAGS='HOST_EXTRACFLAGS=-DR_X86_64_JUMP_SLOT=7 -Wno-macro-redefined KBUILD_HOSTCFLAGS=-DR_X86_64_JUMP_SLOT=7 -Wno-macro-redefined'
+
 printf 'Validating Linux kernel configuration...\n'
-gmake LLVM=1 ARCH=x86_64 olddefconfig
+gmake LLVM=1 ARCH=x86_64 HOST_EXTRACFLAGS="-DR_X86_64_JUMP_SLOT=7 -Wno-macro-redefined" KBUILD_HOSTCFLAGS="-DR_X86_64_JUMP_SLOT=7 -Wno-macro-redefined" olddefconfig
 
 NPROC=$(sysctl -n hw.ncpu 2>/dev/null || nproc 2>/dev/null || echo 2)
 printf 'Compiling Linux kernel EFI stub with %s jobs...\n' "$NPROC"
-gmake LLVM=1 ARCH=x86_64 -j"$NPROC" bzImage
+gmake LLVM=1 ARCH=x86_64 HOST_EXTRACFLAGS="-DR_X86_64_JUMP_SLOT=7 -Wno-macro-redefined" KBUILD_HOSTCFLAGS="-DR_X86_64_JUMP_SLOT=7 -Wno-macro-redefined" -j"$NPROC" bzImage
 
 BZIMAGE="${SOURCE_DIR}/arch/x86/boot/bzImage"
 [ -f "$BZIMAGE" ] || fail "Kernel bzImage was not produced at $BZIMAGE"
