@@ -15,7 +15,6 @@
       "config": {
         "runtime_socket": "/var/run/freebsd-laboratory/runtime.sock",
         "ssh_user": "freebsd",
-        "ssh_private_key": "/usr/local/etc/freebsd-laboratory/id_ed25519",
         "startup_timeout": 30,
         "ssh_connect_timeout": 5,
         "ssh_connection_attempts": 3,

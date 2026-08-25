@@ -1,17 +1,17 @@
 {
   "argv": [
-    "/usr/local/bin/python3",
+    "/usr/bin/python3",
     "-m",
     "ipykernel_launcher",
     "-f",
     "{connection_file}"
   ],
-  "display_name": "FreeBSD (Python 3, bhyve)",
+  "display_name": "Linux (Python 3, bhyve)",
   "language": "python",
   "interrupt_mode": "message",
   "metadata": {
     "kernel_provisioner": {
-      "provisioner_name": "freebsd-bhyve-provisioner",
+      "provisioner_name": "linux-bhyve-provisioner",
       "config": {
         "runtime_socket": "/var/run/freebsd-laboratory/runtime.sock",
         "ssh_user": "freebsd",

@@ -35,6 +35,23 @@ executor:
       switch: freebsdlab
       bridge: labbridge0
       network: 172.31.254.0/24
+    bhyve-linux:
+      kernelspec: linux-python-bhyve
+      manager: vm-bhyve
+      ephemeral: true
+      template: linux-lab
+      image: linux-python.raw
+      switch: freebsdlab
+      bridge: labbridge0
+      network: 172.31.254.0/24
+      runtime:
+        os: linux
+        architecture: amd64
+      checks:
+        - id: kernel
+          command: uname -s
+          expect:
+            stdout: Linux
 
 notebook: notebooks/Intro.ipynb
 
