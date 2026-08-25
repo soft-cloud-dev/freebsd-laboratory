@@ -15,6 +15,18 @@ bridge network. See `ARCHITECTURE.md` for the full trust model.
 - The runtime daemon socket is at `/var/run/freebsd-laboratory/runtime.sock`.
 - When running commands on the remote host through Terminal.app, use `osascript`
   to send commands to the active SSH tab, then read back terminal contents.
+- **`osascript` quoting rule**: Never embed multi-line shell scripts or scripts
+  containing double-quotes directly inside `do script "..."`. Instead, write the
+  script to a file on the remote host first, then pass the path:
+  ```sh
+  # WRONG — breaks when inner script has double-quotes:
+  osascript -e 'tell application "Terminal" to do script "VAR=\"value\" && cmd" ...'
+
+  # RIGHT — write script to file first, then execute by path:
+  osascript -e 'tell application "Terminal" to do script "cat > /tmp/run.sh << EOF\n#!/bin/sh\n...\nEOF\nsh /tmp/run.sh" in window id NNNN'
+  ```
+  For JupyterLab specifically, use `/home/freebsd/freebsd-laboratory/start-jupyter.sh`
+  as the persistent launcher script (created during bootstrap).
 
 ## Build System Conventions
 
