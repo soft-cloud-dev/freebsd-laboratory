@@ -102,6 +102,14 @@ cat > tools/include/asm/bitsperlong.h <<'EOF'
 #endif
 EOF
 
+# FreeBSD host compatibility: provide dummy objtool to bypass host tool compilation
+mkdir -p tools/objtool
+cat > tools/objtool/objtool <<'EOF'
+#!/bin/sh
+exit 0
+EOF
+chmod 0755 tools/objtool/objtool
+
 # FreeBSD host compatibility: fix BSD install flag ordering in tools Makefiles
 find tools -name Makefile -exec sed -i '' -e 's/\$(INSTALL) \$1 \$(if \$3,-m \$3,)/\$(INSTALL) \$(if \$3,-m \$3,) \$1/g' {} + 2>/dev/null || true
 
