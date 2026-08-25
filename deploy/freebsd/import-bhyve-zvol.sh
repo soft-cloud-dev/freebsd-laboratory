@@ -34,6 +34,15 @@ fi
 printf 'Creating zvol %s (%s)...\n' "$ZVOL_NAME" "$ZVOL_SIZE"
 zfs create -V "$ZVOL_SIZE" -s "$ZVOL_NAME"
 
+# Wait for devfs device node to appear
+for _ in $(seq 1 50); do
+    if [ -e "/dev/zvol/${ZVOL_NAME}" ] || [ -c "/dev/zvol/${ZVOL_NAME}" ]; then
+        break
+    fi
+    sleep 0.1
+done
+sleep 0.5
+
 printf 'Populating zvol from %s...\n' "$RAW_IMAGE"
 sysctl kern.geom.debugflags=16 >/dev/null 2>&1 || true
 dd if="$RAW_IMAGE" of="/dev/zvol/${ZVOL_NAME}" bs=1M status=none
