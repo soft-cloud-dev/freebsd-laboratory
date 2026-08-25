@@ -12,6 +12,7 @@ fi
 
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 SRC_DIR=${SRC_DIR:-/usr/src}
+PORTSDIR=${PORTSDIR:-/usr/ports}
 BUILD_ID=${BUILD_ID:-$(date -u +%Y%m%dT%H%M%SZ)}
 OUTPUT_DIR=${OUTPUT_DIR:-/var/db/freebsd-laboratory/images}
 OBJ_ROOT=${OBJ_ROOT:-/var/tmp/freebsd-laboratory-vm-${BUILD_ID}}
@@ -35,6 +36,11 @@ done
 
 if [ ! -f "${SRC_DIR}/release/Makefile" ] || [ ! -f "${SRC_DIR}/release/Makefile.vm" ]; then
     echo "FreeBSD release source tree not found at ${SRC_DIR}" >&2
+    exit 1
+fi
+if [ ! -f "${PORTSDIR}/ports-mgmt/pkg/Makefile" ]; then
+    echo "FreeBSD ports tree with ports-mgmt/pkg is required at ${PORTSDIR}" >&2
+    echo "Install or update ports, or set PORTSDIR to a populated ports checkout." >&2
     exit 1
 fi
 if [ ! -f "$VM_IMAGE_CONFIG" ]; then
@@ -114,6 +120,7 @@ rm -f "$VM_TARGET" "$VM_INTERMEDIATE" "$SOURCE_IMAGE"
 set -- \
     env \
     MAKEOBJDIRPREFIX="$OBJ_ROOT" \
+    PORTSDIR="$PORTSDIR" \
     LAB_BUILD_ID="$BUILD_ID" \
     LAB_SOURCE_BRANCH="$SOURCE_BRANCH" \
     LAB_SOURCE_REVISION="$SOURCE_REVISION" \
