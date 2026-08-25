@@ -499,11 +499,7 @@ if is_yes "$LAB_INSTALL_BHYVE_BACKEND"; then
             freebsdlab
     fi
 
-    # NOTE: Do NOT set "vm switch private freebsdlab on".
-    # The PRIVATE bridge member flag blocks the FreeBSD host from forwarding
-    # packets to VM tap ports (ping: sendto: Permission denied), making SSH
-    # from host→guest impossible. VM-to-VM isolation is enforced at L3 by
-    # the PF anchor (block in on labbridge0).
+    vm switch private freebsdlab on
     vm switch info freebsdlab >/dev/null || \
         fail "vm-bhyve switch freebsdlab is unavailable"
 fi
