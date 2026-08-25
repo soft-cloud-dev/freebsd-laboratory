@@ -106,11 +106,13 @@ Do not destroy an older snapshot while active ZFS clones still depend on it.
 
 ## bhyve image
 
-`build-bhyve-image.sh` remains source-based. It drives the FreeBSD release `vm-image` target with raw/UFS output and `vmimage.conf`. The configuration adds Python, ipykernel, cloud-init, the `freebsd` account, and the restricted SSH policy before the image is unmounted. It pre-creates the target `/usr/local/lib` directory before FreeBSD's initial linker-cache setup, then runs `ldconfig forcestart` after each package-installation phase before executing the target Python interpreter.
+`build-bhyve-image.sh` remains source-based. It drives the FreeBSD release `vm-image` target with raw/UFS output and `vmimage.conf`. The configuration adds Python, ipykernel, cloud-init support, the `freebsd` account, and the restricted SSH policy before the image is unmounted. FreeBSD's native `nuageinit` service processes vm-bhyve's NoCloud seed, including `network-config` and SSH authorized keys. The image enables `nuageinit`, not the Python package's `cloudinit` rc service. It pre-creates `freebsd`'s `authorized_keys` with that user's numeric UID/GID because nuageinit otherwise creates the file as root and sshd rejects it under strict modes. It also pre-creates the target `/usr/local/lib` directory before FreeBSD's initial linker-cache setup, then runs `ldconfig forcestart` after each package-installation phase before executing the target Python interpreter.
 
 The builder fails closed unless the selected FreeBSD source revision exposes `VM_IMAGE_CONFIG` in `release/Makefile.vm`. Without that support, `make vm-image` would ignore the laboratory customization file and could produce an apparently valid but unusable base image.
 
 FreeBSD's `vm-image` target bootstraps `pkg` from the ports tree while it prepares its pkgbase repository. Before starting the image build, this wrapper therefore requires a populated `${PORTSDIR:-/usr/ports}/ports-mgmt/pkg` directory. Set `PORTSDIR` when the ports checkout is not mounted at `/usr/ports`.
+
+The release helper replaces the port's normal configure arguments while building the pkgbase copy of `pkg`. The wrapper therefore supplies `MAKE_ARGS=mandir=/usr/local/share/man` for that port install so its staged manpages continue to match the current ports packing list. Override `PKG_BOOTSTRAP_MAKE_ARGS` only when using a ports revision with different staging requirements.
 
 Artifacts are versioned under `/var/db/freebsd-laboratory/images` by default:
 

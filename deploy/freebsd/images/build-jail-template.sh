@@ -212,6 +212,20 @@ pkg_root()
     fi
 }
 
+refresh_target_ldconfig()
+{
+    install -d -m 0755 "$ROOT/var/run"
+    if [ ! -x "$ROOT/etc/rc.d/ldconfig" ]; then
+        echo "Target ldconfig rc.d script is unavailable: $ROOT/etc/rc.d/ldconfig" >&2
+        exit 1
+    fi
+    chroot "$ROOT" /etc/rc.d/ldconfig onestart
+    if [ ! -s "$ROOT/var/run/ld-elf.so.hints" ]; then
+        echo "Target ldconfig did not create /var/run/ld-elf.so.hints" >&2
+        exit 1
+    fi
+}
+
 pkg_audit_root()
 {
     AUDIT_OUTPUT=$(mktemp /tmp/freebsd-lab-pkg-audit.XXXXXX)
@@ -270,6 +284,7 @@ printf 'Target jail package ABI: %s\n' "$TARGET_ABI"
 
 pkg_root update -f
 pkg_root install -y $LAB_JAIL_PACKAGES
+refresh_target_ldconfig
 
 if [ -z "$LAB_JAIL_IPYKERNEL_PACKAGE" ]; then
     LAB_JAIL_PYTHON_TAG=$(chroot "$ROOT" /usr/local/bin/python3 -c \
@@ -277,6 +292,7 @@ if [ -z "$LAB_JAIL_IPYKERNEL_PACKAGE" ]; then
     LAB_JAIL_IPYKERNEL_PACKAGE="${LAB_JAIL_PYTHON_TAG}-ipykernel"
 fi
 pkg_root install -y "$LAB_JAIL_IPYKERNEL_PACKAGE"
+refresh_target_ldconfig
 
 if ! pw -R "$ROOT" usershow freebsd >/dev/null 2>&1; then
     pw -R "$ROOT" useradd freebsd -m -s /bin/sh -w no
@@ -292,17 +308,6 @@ rm -f "$ROOT"/etc/ssh/ssh_host_*_key "$ROOT"/etc/ssh/ssh_host_*_key.pub
 touch "$ROOT/etc/rc.conf"
 if ! grep -Eq '^sshd_enable=' "$ROOT/etc/rc.conf"; then
     printf 'sshd_enable="YES"\n' >> "$ROOT/etc/rc.conf"
-fi
-
-install -d -m 0755 "$ROOT/var/run"
-if [ ! -x "$ROOT/etc/rc.d/ldconfig" ]; then
-    echo "Target ldconfig rc.d script is unavailable: $ROOT/etc/rc.d/ldconfig" >&2
-    exit 1
-fi
-chroot "$ROOT" /etc/rc.d/ldconfig onestart
-if [ ! -s "$ROOT/var/run/ld-elf.so.hints" ]; then
-    echo "Target ldconfig did not create /var/run/ld-elf.so.hints" >&2
-    exit 1
 fi
 
 PYTHON_LDD=$(chroot "$ROOT" /usr/bin/ldd /usr/local/bin/python3 2>&1 || true)

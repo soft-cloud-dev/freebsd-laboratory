@@ -152,17 +152,28 @@ class SSHTransport:
             raise ValueError("timeout must be a positive integer")
         deadline = time.monotonic() + timeout
         last_detail = "SSH did not become ready"
-        probe_timeout = max(5, self.connect_timeout + 2)
+        probe_timeout = max(
+            5,
+            self.connect_timeout * self.connection_attempts + 2,
+        )
         while time.monotonic() < deadline:
-            result = self._run(
-                self.command("true"),
-                check=False,
-                timeout=probe_timeout,
-            )
+            remaining = deadline - time.monotonic()
+            try:
+                result = self._run(
+                    self.command("true"),
+                    check=False,
+                    timeout=min(probe_timeout, remaining),
+                )
+            except RuntimeError as error:
+                if not str(error).startswith("Command timed out:"):
+                    raise
+                last_detail = str(error)
+                time.sleep(min(1, max(0, deadline - time.monotonic())))
+                continue
             if result.returncode == 0:
                 return
             last_detail = result.stderr.strip() or result.stdout.strip() or last_detail
-            time.sleep(1)
+            time.sleep(min(1, max(0, deadline - time.monotonic())))
         raise RuntimeError(f"Timed out waiting for {self.target} SSH: {last_detail}")
 
     def stage(self, host_path: Path, remote_dir: str) -> str:

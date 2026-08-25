@@ -173,7 +173,7 @@ env ASSUME_ALWAYS_YES=yes pkg bootstrap >/dev/null 2>&1 || true
 pkg update -f
 pkg install -y git python3 npm
 if is_yes "$LAB_INSTALL_BHYVE_BACKEND"; then
-    pkg install -y vm-bhyve
+    pkg install -y vm-bhyve qemu-tools
 fi
 
 PYTHON=/usr/local/bin/python3
