@@ -33,6 +33,7 @@ def test_reference_shell_composition_is_preserved() -> None:
 
 def test_reference_geometry_and_brand_rails_are_preserved() -> None:
     style = STYLE.read_text(encoding="utf-8")
+    source = SOURCE.read_text(encoding="utf-8")
 
     assert ".freebsdLab-Masthead" in style
     assert "min-height: 80px" in style
@@ -43,6 +44,13 @@ def test_reference_geometry_and_brand_rails_are_preserved() -> None:
     assert ".freebsdLab-IntroCard" in style
     assert ".freebsdLab-StatusBar" in style
     assert "--freebsd-lab-red: #b31b21" in style
+    assert "#jp-main-logo" in style
+    assert ".jp-MainLogo" in style
+    assert ".freebsdLab-StatusSimpleToggle" in style
+    assert ".freebsdLab-StatusSimpleToggle.is-active" in style
+    assert "freebsdLab-StatusSimpleToggle" in source
+    assert 'setAttribute(\'role\', \'switch\')' in source or 'setAttribute("role", "switch")' in source
+    assert "shell.modeChanged.connect" in source
 
 
 def test_shell_fidelity_overrides_are_loaded_and_lock_split_geometry() -> None:

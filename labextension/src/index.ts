@@ -170,15 +170,34 @@ class Masthead extends Widget {
   }
 }
 
+interface LaboratoryStatusBarOptions {
+  mode?: 'single-document' | 'multiple-document';
+  onToggleMode?: () => void;
+}
+
 class LaboratoryStatusBar extends Widget {
   private runtime = 'FreeBSD laboratory';
   private notebook = 'Intro.ipynb';
+  private mode: 'single-document' | 'multiple-document' = 'multiple-document';
+  private onToggleMode?: () => void;
 
-  constructor() {
+  constructor(options?: LaboratoryStatusBarOptions) {
     super();
     this.id = 'freebsd-laboratory-status';
     this.addClass('freebsdLab-StatusBar');
     this.node.setAttribute('role', 'status');
+    if (options?.mode) {
+      this.mode = options.mode;
+    }
+    this.onToggleMode = options?.onToggleMode;
+    this.render();
+  }
+
+  setMode(mode: 'single-document' | 'multiple-document'): void {
+    if (this.mode === mode) {
+      return;
+    }
+    this.mode = mode;
     this.render();
   }
 
@@ -198,13 +217,36 @@ class LaboratoryStatusBar extends Widget {
     this.node.replaceChildren();
 
     const left = element('div', 'freebsdLab-StatusLeft');
+    const simpleToggle = element('button', 'freebsdLab-StatusSimpleToggle');
+    simpleToggle.type = 'button';
+    simpleToggle.setAttribute('role', 'switch');
+    const isSimple = this.mode === 'single-document';
+    simpleToggle.setAttribute('aria-checked', isSimple ? 'true' : 'false');
+    simpleToggle.setAttribute(
+      'aria-label',
+      `Simple interface: ${isSimple ? 'on' : 'off'}`
+    );
+    simpleToggle.title = `Toggle simple interface (${isSimple ? 'currently on' : 'currently off'})`;
+    if (isSimple) {
+      simpleToggle.classList.add('is-active');
+    }
+
     const simple = element('span', 'freebsdLab-StatusSimple', 'Simple');
     const toggle = element('span', 'freebsdLab-StatusToggle');
     toggle.setAttribute('aria-hidden', 'true');
     toggle.appendChild(element('span', 'freebsdLab-StatusToggleKnob'));
+    simpleToggle.append(simple, toggle);
+
+    if (this.onToggleMode) {
+      simpleToggle.addEventListener('click', (event: MouseEvent) => {
+        event.preventDefault();
+        event.stopPropagation();
+        this.onToggleMode?.();
+      });
+    }
+
     left.append(
-      simple,
-      toggle,
+      simpleToggle,
       element('span', 'freebsdLab-StatusMetric', '⊙ 0'),
       element('span', 'freebsdLab-StatusMetric', '$_ 0'),
       element('span', 'freebsdLab-StatusMetric', '◉'),
@@ -400,7 +442,17 @@ const plugin: JupyterFrontEndPlugin<void> = {
     palette: ICommandPalette | null
   ): void => {
     const shell = app.shell as ILabShell;
-    const statusBar = new LaboratoryStatusBar();
+    const toggleMode = (): void => {
+      shell.mode =
+        shell.mode === 'single-document'
+          ? 'multiple-document'
+          : 'single-document';
+    };
+
+    const statusBar = new LaboratoryStatusBar({
+      mode: shell.mode,
+      onToggleMode: toggleMode
+    });
     const progression = new ProgressionPanel(state => statusBar.setState(state));
     const masthead = new Masthead();
     const attachedNotebooks = new WeakSet<NotebookPanel>();
@@ -410,6 +462,10 @@ const plugin: JupyterFrontEndPlugin<void> = {
     app.shell.add(masthead, 'header', { rank: 0 });
     app.shell.add(progression, 'right', { rank: 900 });
     app.shell.add(statusBar, 'bottom', { rank: 0 });
+
+    shell.modeChanged.connect((_sender, mode) => {
+      statusBar.setMode(mode);
+    });
 
     const enforceReferenceShell = (): void => {
       shell.mode = 'multiple-document';
@@ -494,6 +550,7 @@ const plugin: JupyterFrontEndPlugin<void> = {
       const exportButton = new ToolbarButton({
         label: '⇩ Export evidence',
         tooltip: 'Export the server-owned evidence bundle',
+        className: 'freebsdLab-ExportButton',
         onClick: () => {
           void app.commands.execute(EXPORT_COMMAND);
         }

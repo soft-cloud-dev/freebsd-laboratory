@@ -38,6 +38,35 @@ bridge network. See `ARCHITECTURE.md` for the full trust model.
     - When the user explicitly commands `Sleep.` or `sleep`, immediately schedule a realistic one-shot timer, acknowledge with a single concise message, and end the turn without intermediate polling.
   - **Leverage `TimerCondition`**: When setting a `schedule` timer to monitor background tasks or subagents, specify `TimerCondition: "<task-id>"` or `TimerCondition: "any"` so the timer cancels early as soon as a relevant update or notification arrives.
 
+## Local Development & Labextension Workflow
+
+- **Local vs. Remote Boundary**:
+  - Labextension frontend code (`labextension/src/`, `labextension/style/`), UI styles, contract assertions, and documentation changes are developed, edited, and validated locally in the workspace.
+  - Do not attempt to SSH to the remote host for frontend/UI tasks unless explicitly asked to restart services or perform host-level system diagnostics.
+- **Local Python Contract Testing**:
+  - Python contract tests in `tests/` verify image build scripts, UI geometry, and package configurations without requiring remote host access.
+  - When `pytest` is unavailable in the local environment, run contract tests using Python's standard library `unittest` runner:
+    ```sh
+    python3 -c "
+    import unittest
+    suite = unittest.TestSuite()
+    for mod_name in ['tests.test_ui_reference_contract', 'tests.test_labextension_contract', 'tests.test_bootstrap', 'tests.test_golden_image_python_package_contract', 'tests.test_golden_image_linux_contract', 'tests.test_golden_image_objdir_contract']:
+        mod = __import__(mod_name, fromlist=['*'])
+        for name in dir(mod):
+            if name.startswith('test_') and callable(getattr(mod, name)):
+                fn = getattr(mod, name)
+                class C(unittest.TestCase): pass
+                setattr(C, name, lambda self, f=fn: f())
+                suite.addTest(C(name))
+    runner = unittest.TextTestRunner(verbosity=2)
+    assert runner.run(suite).wasSuccessful()
+    "
+    ```
+- **Labextension NPM Build Structure**:
+  - Source files: `labextension/src/index.ts` (TypeScript) and `labextension/style/index.css` (CSS) are tracked in git.
+  - Build script: `npm run build` executes `npm run build:lib` (`tsc`) followed by `npm run build:labextension` (`jupyter-builder build .`).
+  - Keep `src/index.ts` and `lib/index.js` synchronized when modifying extension logic.
+
 ## Build System Conventions
 
 ### Golden Image (bhyve)

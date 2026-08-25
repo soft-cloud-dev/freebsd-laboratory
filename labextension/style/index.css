@@ -277,7 +277,10 @@ body.freebsdLab-ReferenceShell #jp-menu-panel .lm-MenuBar-item {
   line-height: 42px;
 }
 
-body.freebsdLab-ReferenceShell #jp-title-panel {
+body.freebsdLab-ReferenceShell #jp-title-panel,
+body.freebsdLab-ReferenceShell #jp-main-logo,
+body.freebsdLab-ReferenceShell .jp-MainLogo,
+body.freebsdLab-ReferenceShell .jp-MenuBar-logo {
   display: none !important;
 }
 
@@ -433,7 +436,13 @@ body.freebsdLab-ReferenceShell .jp-NotebookPanel-toolbar .jp-ToolbarButtonCompon
   border-radius: var(--freebsd-lab-radius-xs);
 }
 
-.freebsdLab-ExportButton.jp-ToolbarButtonComponent {
+.freebsdLab-ExportButton,
+.freebsdLab-ExportButton.jp-ToolbarButtonComponent,
+.freebsdLab-ExportButton .jp-ToolbarButtonComponent,
+.freebsdLab-ExportButton button,
+body.freebsdLab-ReferenceShell .freebsdLab-ExportButton.jp-ToolbarButtonComponent,
+body.freebsdLab-ReferenceShell .freebsdLab-ExportButton .jp-ToolbarButtonComponent,
+body.freebsdLab-ReferenceShell .freebsdLab-ExportButton button {
   min-height: 29px;
   margin-left: auto !important;
   padding: 0 var(--freebsd-lab-space-3);
@@ -446,12 +455,21 @@ body.freebsdLab-ReferenceShell .jp-NotebookPanel-toolbar .jp-ToolbarButtonCompon
   transition: background-color 0.15s ease, border-color 0.15s ease;
 }
 
-.freebsdLab-ExportButton.jp-ToolbarButtonComponent:hover {
+.freebsdLab-ExportButton:hover,
+.freebsdLab-ExportButton.jp-ToolbarButtonComponent:hover,
+.freebsdLab-ExportButton .jp-ToolbarButtonComponent:hover,
+.freebsdLab-ExportButton button:hover,
+body.freebsdLab-ReferenceShell .freebsdLab-ExportButton.jp-ToolbarButtonComponent:hover,
+body.freebsdLab-ReferenceShell .freebsdLab-ExportButton .jp-ToolbarButtonComponent:hover,
+body.freebsdLab-ReferenceShell .freebsdLab-ExportButton button:hover {
   background: var(--freebsd-lab-red-dark) !important;
   border-color: var(--freebsd-lab-red-dark) !important;
 }
 
-.freebsdLab-ExportButton .jp-ToolbarButtonComponent-label {
+.freebsdLab-ExportButton .jp-ToolbarButtonComponent-label,
+.freebsdLab-ExportButton button span,
+.freebsdLab-ExportButton span,
+body.freebsdLab-ReferenceShell .freebsdLab-ExportButton .jp-ToolbarButtonComponent-label {
   color: var(--freebsd-lab-text-on-brand) !important;
   font-size: var(--freebsd-lab-font-size-base);
   font-weight: var(--freebsd-lab-font-weight-semibold);
@@ -951,8 +969,35 @@ body.freebsdLab-ReferenceShell #jp-bottom-panel > .lm-Widget:not(.freebsdLab-Sta
   white-space: nowrap;
 }
 
+.freebsdLab-StatusSimpleToggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 5px;
+  margin: 0;
+  border: 0;
+  border-radius: var(--freebsd-lab-radius-xs);
+  background: transparent;
+  color: var(--freebsd-lab-text-on-dark);
+  font-family: inherit;
+  font-size: inherit;
+  cursor: pointer;
+  outline: none;
+  transition: background-color 0.15s ease, opacity 0.15s ease;
+}
+
+.freebsdLab-StatusSimpleToggle:hover {
+  background: rgba(255, 255, 255, 0.15);
+}
+
+.freebsdLab-StatusSimpleToggle:focus-visible {
+  outline: 1px solid rgba(255, 255, 255, 0.8);
+  outline-offset: 1px;
+}
+
 .freebsdLab-StatusSimple {
   font-weight: var(--freebsd-lab-font-weight-semibold);
+  user-select: none;
 }
 
 .freebsdLab-StatusToggle {
@@ -961,6 +1006,7 @@ body.freebsdLab-ReferenceShell #jp-bottom-panel > .lm-Widget:not(.freebsdLab-Sta
   height: 13px;
   border: 1px solid rgba(255, 255, 255, 0.8);
   border-radius: var(--freebsd-lab-radius-lg);
+  transition: background-color 0.2s ease, border-color 0.2s ease;
 }
 
 .freebsdLab-StatusToggleKnob {
@@ -971,6 +1017,17 @@ body.freebsdLab-ReferenceShell #jp-bottom-panel > .lm-Widget:not(.freebsdLab-Sta
   height: 7px;
   border-radius: var(--freebsd-lab-radius-full);
   background: var(--freebsd-lab-text-on-dark);
+  transition: transform 0.2s ease, background-color 0.2s ease;
+}
+
+.freebsdLab-StatusSimpleToggle.is-active .freebsdLab-StatusToggle {
+  background: rgba(255, 255, 255, 0.4);
+  border-color: #ffffff;
+}
+
+.freebsdLab-StatusSimpleToggle.is-active .freebsdLab-StatusToggleKnob {
+  transform: translateX(12px);
+  background: #ffffff;
 }
 
 .freebsdLab-StatusMetric,
