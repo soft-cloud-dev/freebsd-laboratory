@@ -12,10 +12,13 @@ fail()
 RAW_IMAGE=${1:-/var/db/freebsd-laboratory/images/freebsd-python.raw}
 ZVOL_PARENT=${2:-zroot/vm/.zvol}
 ZVOL_NAME="${ZVOL_PARENT}/freebsd-python"
-ZVOL_SIZE=${3:-8G}
-SNAPSHOT_NAME="${ZVOL_NAME}@ready"
 
 [ -f "$RAW_IMAGE" ] || fail "Golden raw image not found: $RAW_IMAGE"
+
+IMAGE_BYTES=$(stat -f %z "$RAW_IMAGE" 2>/dev/null || stat -c %s "$RAW_IMAGE" 2>/dev/null || wc -c < "$RAW_IMAGE")
+ZVOL_SIZE=${3:-${IMAGE_BYTES}}
+SNAPSHOT_NAME="${ZVOL_NAME}@ready"
+
 
 if ! zfs list -H -o name "$ZVOL_PARENT" >/dev/null 2>&1; then
     printf 'Creating parent dataset: %s\n' "$ZVOL_PARENT"
