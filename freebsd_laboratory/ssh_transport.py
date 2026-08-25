@@ -19,6 +19,47 @@ def executable_exists(command: str) -> bool:
     return shutil.which(command) is not None
 
 
+def create_runtime_ssh_key(
+    runtime_path: Path,
+    ssh_keygen_command: str = "/usr/bin/ssh-keygen",
+) -> tuple[Path, str]:
+    if runtime_path.is_symlink() or not runtime_path.is_dir():
+        raise RuntimeError(f"Runtime directory must be a regular directory: {runtime_path}")
+    private_key = runtime_path / "id_ed25519"
+    public_key = runtime_path / "id_ed25519.pub"
+    result = subprocess.run(
+        [
+            ssh_keygen_command,
+            "-q",
+            "-t",
+            "ed25519",
+            "-N",
+            "",
+            "-f",
+            str(private_key),
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=15,
+    )
+    if result.returncode != 0:
+        detail = result.stderr.strip() or result.stdout.strip() or "ssh-keygen failed"
+        raise RuntimeError(
+            f"Unable to generate per-runtime SSH key: {detail}"
+        )
+    if private_key.is_symlink() or not private_key.is_file():
+        raise RuntimeError("ssh-keygen did not create a regular private key")
+    if public_key.is_symlink() or not public_key.is_file():
+        raise RuntimeError("ssh-keygen did not create a regular public key")
+    os.chmod(private_key, 0o600, follow_symlinks=False)
+    os.chmod(public_key, 0o600, follow_symlinks=False)
+    material = public_key.read_text(encoding="utf-8").strip()
+    if "\n" in material or not material.startswith("ssh-ed25519 "):
+        raise RuntimeError("ssh-keygen returned an invalid Ed25519 public key")
+    return private_key, material
+
+
 @dataclass
 class SSHTransport:
     host: str

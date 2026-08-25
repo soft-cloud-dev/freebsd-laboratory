@@ -25,6 +25,9 @@ dependencies = [
 signing = [
   "cryptography>=45,<47"
 ]
+agent = [
+  "llama-cpp-python>=0.3,<1"
+]
 dev = [
   "cryptography>=45,<47",
   "pytest>=8,<9",
@@ -38,6 +41,7 @@ freebsd-lab-gc = "freebsd_laboratory.gc:main"
 freebsd-lab-verify-evidence = "freebsd_laboratory.verify:main"
 freebsd-lab-sentry-diagnose = "freebsd_laboratory.sentry_diagnostics:main"
 freebsd-lab-benchmark = "freebsd_laboratory.benchmark:main"
+freebsd-lab-agent = "freebsd_laboratory.agent.cli:main"
 
 [project.entry-points."jupyter_client.kernel_provisioners"]
 freebsd-jail-provisioner = "freebsd_laboratory.provisioner:FreeBSDJailProvisioner"
