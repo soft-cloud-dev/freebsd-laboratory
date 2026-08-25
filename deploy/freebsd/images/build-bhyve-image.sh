@@ -17,13 +17,33 @@ BUILD_ID=${BUILD_ID:-$(date -u +%Y%m%dT%H%M%SZ)}
 OUTPUT_DIR=${OUTPUT_DIR:-/var/db/freebsd-laboratory/images}
 OBJ_ROOT=${OBJ_ROOT:-/var/tmp/freebsd-laboratory-vm-${BUILD_ID}}
 VM_SIZE=${VM_SIZE:-8g}
-TARGET=${TARGET:-amd64}
-TARGET_ARCH=${TARGET_ARCH:-amd64}
+PKG_BOOTSTRAP_MAKE_ARGS=${PKG_BOOTSTRAP_MAKE_ARGS:-mandir=/usr/local/share/man}
+case "$(uname -m)" in
+    amd64)
+        DEFAULT_TARGET=amd64
+        DEFAULT_TARGET_ARCH=amd64
+        ;;
+    aarch64|arm64)
+        DEFAULT_TARGET=arm64
+        DEFAULT_TARGET_ARCH=aarch64
+        ;;
+    *)
+        if [ -z "${TARGET:-}" ] || [ -z "${TARGET_ARCH:-}" ]; then
+            echo "Set TARGET and TARGET_ARCH explicitly on unsupported host architecture: $(uname -m)" >&2
+            exit 1
+        fi
+        DEFAULT_TARGET=$TARGET
+        DEFAULT_TARGET_ARCH=$TARGET_ARCH
+        ;;
+esac
+TARGET=${TARGET:-$DEFAULT_TARGET}
+TARGET_ARCH=${TARGET_ARCH:-$DEFAULT_TARGET_ARCH}
 LAB_VM_PACKAGES=${LAB_VM_PACKAGES:-python3}
 LAB_VM_IPYKERNEL_PACKAGE=${LAB_VM_IPYKERNEL_PACKAGE:-}
 LAB_VM_CLOUD_INIT_PACKAGE=${LAB_VM_CLOUD_INIT_PACKAGE:-}
 LAB_PKG_REPOS_DIR=${LAB_PKG_REPOS_DIR:-}
 LAB_FAIL_ON_PKG_AUDIT=${LAB_FAIL_ON_PKG_AUDIT:-YES}
+LAB_PKG_AUDIT_ALLOWED_VULN_IDS=${LAB_PKG_AUDIT_ALLOWED_VULN_IDS-}
 VM_IMAGE_CONFIG=${VM_IMAGE_CONFIG:-${SCRIPT_DIR}/vmimage.conf}
 LAB_SSHD_POLICY=${LAB_SSHD_POLICY:-${SCRIPT_DIR}/sshd-freebsd-lab.conf}
 
@@ -61,7 +81,8 @@ SOURCE_REVISION=$(git -C "$SRC_DIR" rev-parse --verify HEAD)
 SOURCE_BRANCH=$(git -C "$SRC_DIR" rev-parse --abbrev-ref HEAD)
 
 mkdir -p "$OBJ_ROOT" "$OUTPUT_DIR"
-OBJDIR=$(env MAKEOBJDIRPREFIX="$OBJ_ROOT" make -C "${SRC_DIR}/release" -V .OBJDIR)
+OBJDIR=$(env MAKEOBJDIRPREFIX="$OBJ_ROOT" make -C "${SRC_DIR}/release" \
+    TARGET="$TARGET" TARGET_ARCH="$TARGET_ARCH" -V .OBJDIR)
 case "$OBJDIR" in
     /*) ;;
     *)
@@ -120,6 +141,7 @@ rm -f "$VM_TARGET" "$VM_INTERMEDIATE" "$SOURCE_IMAGE"
 set -- \
     env \
     MAKEOBJDIRPREFIX="$OBJ_ROOT" \
+    MAKE_ARGS="$PKG_BOOTSTRAP_MAKE_ARGS" \
     PORTSDIR="$PORTSDIR" \
     LAB_BUILD_ID="$BUILD_ID" \
     LAB_SOURCE_BRANCH="$SOURCE_BRANCH" \
@@ -128,6 +150,7 @@ set -- \
     LAB_VM_IPYKERNEL_PACKAGE="$LAB_VM_IPYKERNEL_PACKAGE" \
     LAB_VM_CLOUD_INIT_PACKAGE="$LAB_VM_CLOUD_INIT_PACKAGE" \
     LAB_FAIL_ON_PKG_AUDIT="$LAB_FAIL_ON_PKG_AUDIT" \
+    LAB_PKG_AUDIT_ALLOWED_VULN_IDS="$LAB_PKG_AUDIT_ALLOWED_VULN_IDS" \
     LAB_SSHD_POLICY="$LAB_SSHD_POLICY"
 
 if [ -n "$LAB_PKG_REPOS_DIR" ]; then

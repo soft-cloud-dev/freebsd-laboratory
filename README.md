@@ -159,7 +159,7 @@ Jupyter requests runtime
   -> ipykernel launched on VM loopback
 ```
 
-The prepared raw image must provide cloud-init, SSH, `/usr/local/bin/python3`, and ipykernel. The bundled vm-bhyve template is `freebsd_laboratory/vm-bhyve/freebsd-lab.conf`.
+The prepared raw image must provide NoCloud initialization through FreeBSD's native `nuageinit`, SSH, `/usr/local/bin/python3`, and ipykernel. The bundled vm-bhyve template is `freebsd_laboratory/vm-bhyve/freebsd-lab.conf`.
 
 ## Golden image lifecycle
 

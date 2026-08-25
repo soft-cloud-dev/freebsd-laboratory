@@ -174,7 +174,7 @@ LAB_UPDATE_REPO          YES to fast-forward an existing checkout
 LAB_ZFS_POOL             auto-selects zroot or the only available pool
 LAB_DAEMON_READY_TIMEOUT positive seconds; default 30
 LAB_INSTALL_BHYVE_BACKEND
-                         YES to install vm-bhyve; default NO
+                         YES to install vm-bhyve and qemu-img tools; default NO
 LAB_JAIL_IMAGE_MODE      release (default) or source
 LAB_BUILD_JAIL_IMAGE     YES by default
 LAB_REBUILD_JAIL_IMAGE   YES to build a new mode-specific snapshot

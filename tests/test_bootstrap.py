@@ -212,7 +212,7 @@ def test_bhyve_backend_is_optional_for_jail_only_bootstrap() -> None:
     text = bootstrap_text()
     assert "LAB_INSTALL_BHYVE_BACKEND=${LAB_INSTALL_BHYVE_BACKEND:-NO}" in text
     assert 'if is_yes "$LAB_INSTALL_BHYVE_BACKEND"' in text
-    assert "pkg install -y vm-bhyve" in text
+    assert "pkg install -y vm-bhyve qemu-tools" in text
 
 
 def test_source_mode_retains_buildworld_installworld_pipeline() -> None:

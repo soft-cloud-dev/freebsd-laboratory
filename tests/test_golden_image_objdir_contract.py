@@ -20,6 +20,18 @@ def test_paired_golden_build_uses_one_object_root() -> None:
     assert 'MAKEOBJDIRPREFIX="$OBJ_ROOT"' in bhyve
 
 
+def test_bhyve_build_defaults_to_the_native_freebsd_architecture() -> None:
+    bhyve = BHYVE_BUILDER.read_text(encoding="utf-8")
+
+    assert 'case "$(uname -m)" in' in bhyve
+    assert "aarch64|arm64)" in bhyve
+    assert "DEFAULT_TARGET=arm64" in bhyve
+    assert "DEFAULT_TARGET_ARCH=aarch64" in bhyve
+    assert "TARGET=${TARGET:-$DEFAULT_TARGET}" in bhyve
+    assert "TARGET_ARCH=${TARGET_ARCH:-$DEFAULT_TARGET_ARCH}" in bhyve
+    assert 'TARGET="$TARGET" TARGET_ARCH="$TARGET_ARCH" -V .OBJDIR' in bhyve
+
+
 def test_direct_bhyve_build_discards_only_stale_vm_image_state() -> None:
     bhyve = BHYVE_BUILDER.read_text(encoding="utf-8")
 
@@ -51,6 +63,8 @@ def test_direct_bhyve_build_requires_ports_pkg_bootstrap_source() -> None:
     bhyve = BHYVE_BUILDER.read_text(encoding="utf-8")
 
     assert 'PORTSDIR=${PORTSDIR:-/usr/ports}' in bhyve
+    assert 'PKG_BOOTSTRAP_MAKE_ARGS=${PKG_BOOTSTRAP_MAKE_ARGS:-mandir=/usr/local/share/man}' in bhyve
     assert '[ ! -f "${PORTSDIR}/ports-mgmt/pkg/Makefile" ]' in bhyve
     assert 'FreeBSD ports tree with ports-mgmt/pkg is required at ${PORTSDIR}' in bhyve
+    assert 'MAKE_ARGS="$PKG_BOOTSTRAP_MAKE_ARGS"' in bhyve
     assert 'PORTSDIR="$PORTSDIR"' in bhyve

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import socket
+import subprocess
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from threading import Barrier
@@ -211,6 +212,30 @@ def test_ssh_transport_forwards_all_kernel_ports_with_keepalives(tmp_path: Path)
     for port in PORTS.values():
         assert f"127.0.0.1:{port}:127.0.0.1:{port}" in command
     assert "172.31.254.10" in rendered
+
+
+def test_ssh_transport_retries_timed_out_readiness_probe(tmp_path: Path) -> None:
+    transport = SSHTransport(
+        host="172.31.254.10",
+        user="freebsd",
+        private_key="/tmp/lab-key",
+        known_hosts_file=tmp_path / "known_hosts",
+    )
+    ready = subprocess.CompletedProcess(["ssh"], 0, "", "")
+
+    with (
+        patch.object(
+            SSHTransport,
+            "_run",
+            side_effect=[RuntimeError("Command timed out: ssh"), ready],
+        ) as run,
+        patch("freebsd_laboratory.ssh_transport.time.sleep"),
+    ):
+        transport.wait_until_ready(30)
+
+    assert run.call_count == 2
+    first_timeout = run.call_args_list[0].kwargs["timeout"]
+    assert 16 <= first_timeout <= 17
 
 
 def test_ssh_transport_accepts_default_device_config(tmp_path: Path) -> None:
