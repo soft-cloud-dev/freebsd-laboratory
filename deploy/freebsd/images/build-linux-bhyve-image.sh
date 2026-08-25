@@ -109,6 +109,23 @@ nameserver 1.1.1.1
 nameserver 8.8.8.8
 EOF
 
+# Bootstrap packages into staging rootfs via apk.static
+kldload linux64 >/dev/null 2>&1 || true
+APK_STATIC="${WORK_DIR}/apk.static"
+if [ ! -f "$APK_STATIC" ]; then
+    printf 'Fetching apk.static for package bootstrapping...\n'
+    fetch -o "$APK_STATIC" "https://gitlab.alpinelinux.org/api/v4/projects/5/packages/generic/v2.14.4/x86_64/apk.static"
+    chmod +x "$APK_STATIC"
+    brandelf -t Linux "$APK_STATIC" >/dev/null 2>&1 || true
+fi
+
+printf 'Installing packages into Linux rootfs...\n'
+"$APK_STATIC" --root "$ROOT_STAGE" --initdb add --update-cache \
+    --repository "https://dl-cdn.alpinelinux.org/alpine/v${ALPINE_VERSION%.*}/main" \
+    --repository "https://dl-cdn.alpinelinux.org/alpine/v${ALPINE_VERSION%.*}/community" \
+    --allow-untrusted \
+    alpine-base openrc openssh python3 py3-pip py3-ipykernel
+
 # Inittab and basic init
 cat > "${ROOT_STAGE}/etc/inittab" <<'EOF'
 ::sysinit:/sbin/openrc sysinit
@@ -160,21 +177,41 @@ start() {
     chmod 0700 /home/freebsd /home/freebsd/.ssh
     chown -R freebsd:freebsd /home/freebsd
 
-    # Attempt to mount CD-ROM seed.iso (/dev/sr0)
-    if [ -e /dev/sr0 ] && mount -t iso9660 -o ro /dev/sr0 /mnt/seed 2>/dev/null; then
-        # Parse meta-data for network configuration
-        if [ -f /mnt/seed/meta-data ]; then
-            IP=$(grep -E '^[[:space:]]*ip:' /mnt/seed/meta-data | awk '{print $2}' | tr -d '"' | tr -d "'")
-            IFACE=$(grep -E '^[[:space:]]*interface:' /mnt/seed/meta-data | awk '{print $2}' | tr -d '"' | tr -d "'" || echo "eth0")
-            if [ -n "$IP" ]; then
-                ip link set dev "$IFACE" up 2>/dev/null || true
-                ip addr add "$IP" dev "$IFACE" 2>/dev/null || true
+    # Attempt to mount CD-ROM seed.iso (/dev/sr0, /dev/cdrom, /dev/sda, /dev/sdb)
+    SEED_DEV=""
+    for d in /dev/sr0 /dev/cdrom /dev/sda /dev/sdb; do
+        if [ -e "$d" ]; then
+            SEED_DEV="$d"
+            break
+        fi
+    done
+
+    if [ -n "$SEED_DEV" ] && mount -t iso9660 -o ro "$SEED_DEV" /mnt/seed 2>/dev/null; then
+        # Parse network configuration from network-config or meta-data
+        IFACE="eth0"
+        if [ -f /mnt/seed/network-config ]; then
+            SET_IFACE=$(grep -E 'set-name:' /mnt/seed/network-config 2>/dev/null | awk '{print $2}' | tr -d ' "' || true)
+            [ -n "$SET_IFACE" ] && IFACE="$SET_IFACE"
+            IP=$(grep -E 'addresses:' /mnt/seed/network-config 2>/dev/null | sed -E 's/.*\[([^]/]+(\/[0-9]+)?)\].*/\1/' | tr -d ' "[]' || true)
+            if [ -z "$IP" ]; then
+                IP=$(grep -E '^[[:space:]]*-[[:space:]]*[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' /mnt/seed/network-config 2>/dev/null | awk '{print $2}' | tr -d ' "' || true)
             fi
         fi
 
-        # Parse user-data for SSH authorized keys
+        if [ -z "${IP:-}" ] && [ -f /mnt/seed/meta-data ]; then
+            IP=$(grep -E '^[[:space:]]*ip:' /mnt/seed/meta-data 2>/dev/null | awk '{print $2}' | tr -d ' "' || true)
+            META_IFACE=$(grep -E '^[[:space:]]*interface:' /mnt/seed/meta-data 2>/dev/null | awk '{print $2}' | tr -d ' "' || true)
+            [ -n "$META_IFACE" ] && IFACE="$META_IFACE"
+        fi
+
+        if [ -n "${IP:-}" ]; then
+            ip link set dev "$IFACE" up 2>/dev/null || ifconfig "$IFACE" up 2>/dev/null || true
+            ip addr add "$IP" dev "$IFACE" 2>/dev/null || ifconfig "$IFACE" "${IP%/*}" netmask 255.255.255.0 2>/dev/null || true
+        fi
+
+        # Parse user-data for SSH authorized keys (strip leading YAML bullet if present)
         if [ -f /mnt/seed/user-data ]; then
-            grep -E 'ssh-ed25519|ssh-rsa' /mnt/seed/user-data > /home/freebsd/.ssh/authorized_keys 2>/dev/null || true
+            grep -E 'ssh-ed25519|ssh-rsa' /mnt/seed/user-data | sed -E 's/^[[:space:]]*-[[:space:]]*//' > /home/freebsd/.ssh/authorized_keys 2>/dev/null || true
             chmod 0600 /home/freebsd/.ssh/authorized_keys
             chown freebsd:freebsd /home/freebsd/.ssh/authorized_keys
         fi
@@ -190,6 +227,7 @@ start() {
 EOF
 chmod 0755 "${ROOT_STAGE}/etc/init.d/freebsd-lab-seed"
 ln -sf /etc/init.d/freebsd-lab-seed "${ROOT_STAGE}/etc/runlevels/default/freebsd-lab-seed"
+ln -sf /etc/init.d/sshd "${ROOT_STAGE}/etc/runlevels/default/sshd"
 
 # Write root filesystem into partition 2 using mke2fs (e2fsprogs) or makefs (ext2fs)
 if command -v mke2fs >/dev/null 2>&1; then
