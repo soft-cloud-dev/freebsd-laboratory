@@ -32,6 +32,10 @@ bridge network. See `ARCHITECTURE.md` for the full trust model.
   - Reserve sleep timers exclusively for heavy, CPU-intensive operations (e.g., compiling Linux/FreeBSD kernels, formatting/populating raw UFS/ext4 disk images, or building packages).
   - For quick terminal reads or status queries, inspect output immediately.
   - **Single Realistic Timer Duration**: Estimate the expected runtime for heavy operations upfront and use a single realistic duration rather than chaining multiple short 10s/15s timers in a loop.
+  - **Active Sleep Activation**:
+    - Proactively schedule a single one-shot timer (`schedule(DurationSeconds=N, Prompt="...", TimerCondition="never"|"any")`) when launching multi-step benchmarks, builds, package installations, or VM operations with predictable runtimes, rather than performing repetitive intermediate `osascript` terminal reads.
+    - This drastically saves tokens, prevents terminal thrashing, and yields execution until the operation has completed or reached its expected checkpoint.
+    - When the user explicitly commands `Sleep.` or `sleep`, immediately schedule a realistic one-shot timer, acknowledge with a single concise message, and end the turn without intermediate polling.
   - **Leverage `TimerCondition`**: When setting a `schedule` timer to monitor background tasks or subagents, specify `TimerCondition: "<task-id>"` or `TimerCondition: "any"` so the timer cancels early as soon as a relevant update or notification arrives.
 
 ## Build System Conventions

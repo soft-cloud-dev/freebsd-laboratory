@@ -37,6 +37,7 @@ freebsd-lab-runtime-daemon = "freebsd_laboratory.runtime_entrypoint:main"
 freebsd-lab-gc = "freebsd_laboratory.gc:main"
 freebsd-lab-verify-evidence = "freebsd_laboratory.verify:main"
 freebsd-lab-sentry-diagnose = "freebsd_laboratory.sentry_diagnostics:main"
+freebsd-lab-benchmark = "freebsd_laboratory.benchmark:main"
 
 [project.entry-points."jupyter_client.kernel_provisioners"]
 freebsd-jail-provisioner = "freebsd_laboratory.provisioner:FreeBSDJailProvisioner"

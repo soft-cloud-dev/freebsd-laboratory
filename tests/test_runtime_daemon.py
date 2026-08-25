@@ -343,6 +343,7 @@ def test_create_bhyve_zvol_clone_backend(
     flattened = [" ".join(c) for c in commands_run]
     assert any("zfs clone zroot/vm/.zvol/freebsd-python@ready zroot/vm/freebsd-lab-clone1/disk0" in cmd for cmd in flattened)
     assert any("/bin/true create -t freebsd-lab -C" in cmd and "-i" not in cmd for cmd in flattened)
+    assert any("arp -d 172.31.254.10" in cmd for cmd in flattened)
 
 
 def test_create_bhyve_memdisk_backend(
@@ -468,6 +469,7 @@ def test_destroy_cleans_up_md_unit_and_dataset(
     flattened = [" ".join(c) for c in commands_run]
     assert any("mdconfig -d -u 5" in cmd for cmd in flattened)
     assert any(f"zfs destroy -r -f zroot/vm/{name}" in cmd for cmd in flattened)
+    assert any("arp -d 172.31.254.10" in cmd for cmd in flattened)
 
 
 def test_ping_reports_capabilities_and_profiles(tmp_path: Path) -> None:
@@ -541,3 +543,106 @@ def test_create_bhyve_rejects_invalid_profile(tmp_path: Path, monkeypatch: pytes
 
     with pytest.raises(ValueError, match="Unknown bhyve guest profile"):
         manager.create_bhyve(name, 100, peer, key, profile=True)  # type: ignore[arg-type]
+
+
+def test_ensure_vm_switch_enables_private_flag_when_switch_exists(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manager = make_manager(tmp_path, vm_command="/usr/local/sbin/vm")
+    commands_run: list[list[str]] = []
+
+    def fake_run(cmd: Sequence[str], *, check: bool = True, timeout: float | None = 60) -> subprocess.CompletedProcess[str]:
+        cmd_list = list(cmd)
+        commands_run.append(cmd_list)
+        return subprocess.CompletedProcess(cmd_list, 0, "", "")
+
+    monkeypatch.setattr(manager, "_require_vm_backend", lambda: None)
+    monkeypatch.setattr(manager, "_run", fake_run)
+    manager._ensure_vm_switch()
+
+    assert commands_run == [
+        ["/usr/local/sbin/vm", "switch", "info", "freebsdlab"],
+        ["/usr/local/sbin/vm", "switch", "private", "freebsdlab", "on"],
+    ]
+
+
+def test_ensure_vm_switch_creates_and_enables_private_flag_when_missing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manager = make_manager(tmp_path, vm_command="/usr/local/sbin/vm")
+    commands_run: list[list[str]] = []
+
+    def fake_run(cmd: Sequence[str], *, check: bool = True, timeout: float | None = 60) -> subprocess.CompletedProcess[str]:
+        cmd_list = list(cmd)
+        commands_run.append(cmd_list)
+        if "info" in cmd_list:
+            return subprocess.CompletedProcess(cmd_list, 1, "", "")
+        return subprocess.CompletedProcess(cmd_list, 0, "", "")
+
+    monkeypatch.setattr(manager, "_require_vm_backend", lambda: None)
+    monkeypatch.setattr(manager, "_run", fake_run)
+    manager._ensure_vm_switch()
+
+    assert commands_run == [
+        ["/usr/local/sbin/vm", "switch", "info", "freebsdlab"],
+        [
+            "/usr/local/sbin/vm",
+            "switch",
+            "create",
+            "-t",
+            "manual",
+            "-b",
+            "labbridge0",
+            "freebsdlab",
+        ],
+        ["/usr/local/sbin/vm", "switch", "private", "freebsdlab", "on"],
+    ]
+
+
+def test_create_jail_configures_private_epair_member(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manager = make_manager(tmp_path)
+    name = "freebsd-lab-jail01"
+    peer = PeerCredentials(pid=100, uid=1000, gid=1000)
+    key = ed25519_public_key()
+
+    commands_run: list[list[str]] = []
+
+    def fake_run(cmd: Sequence[str], *, check: bool = True, timeout: float | None = 60) -> subprocess.CompletedProcess[str]:
+        cmd_list = list(cmd)
+        commands_run.append(cmd_list)
+        if cmd_list[:2] == ["ifconfig", "epair"] and "create" in cmd_list:
+            return subprocess.CompletedProcess(cmd_list, 0, "epair42a\n", "")
+        return subprocess.CompletedProcess(cmd_list, 0, "", "")
+
+    monkeypatch.setattr(manager, "_run", fake_run)
+    monkeypatch.setattr(manager, "_ensure_bridge", lambda: None)
+    monkeypatch.setattr(manager, "_snapshot_exists", lambda s: True)
+    monkeypatch.setattr(manager, "_dataset_exists", lambda d: False)
+    monkeypatch.setattr(manager, "_jail_exists", lambda j: False)
+    monkeypatch.setattr(manager, "_interface_exists", lambda i: False)
+    monkeypatch.setattr(manager, "_install_jail_authorized_key", lambda r, k: None)
+    monkeypatch.setattr(
+        runtime_daemon,
+        "query_process_identity",
+        lambda pid: ProcessIdentity(pid=pid, uid=1000, started_at="now", digest="a" * 64),
+    )
+
+    result = manager.create_jail(name, 100, peer, key)
+    assert result["name"] == name
+    assert result["type"] == "jail"
+
+    record = manager._load_registry(name)
+    assert record is not None
+    assert record["epair_host"] == "epair42a"
+    assert record["epair_guest"] == "epair42b"
+
+    assert ["ifconfig", "labbridge0", "addm", "epair42a"] in commands_run
+    assert ["ifconfig", "labbridge0", "private", "epair42a"] in commands_run
+    assert commands_run.index(["ifconfig", "labbridge0", "addm", "epair42a"]) < commands_run.index(
+        ["ifconfig", "labbridge0", "private", "epair42a"]
+    )
