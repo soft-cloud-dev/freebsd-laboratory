@@ -102,6 +102,14 @@ cat > tools/include/asm/bitsperlong.h <<'EOF'
 #endif
 EOF
 
+mkdir -p tools/include/linux
+cat > tools/include/linux/elf.h <<'EOF'
+#ifndef _TOOLS_LINUX_ELF_H
+#define _TOOLS_LINUX_ELF_H
+#include <elf.h>
+#endif
+EOF
+
 # FreeBSD host compatibility: provide dummy objtool to bypass host tool compilation
 mkdir -p tools/objtool
 cat > tools/objtool/Makefile <<'EOF'
