@@ -15,6 +15,10 @@ bridge network. See `ARCHITECTURE.md` for the full trust model.
 - The runtime daemon socket is at `/var/run/freebsd-laboratory/runtime.sock`.
 - When running commands on the remote host through Terminal.app, use `osascript`
   to send commands to the active SSH tab, then read back terminal contents.
+- **Sleep & Polling Timeout Efficiency**:
+  - Never introduce artificial sleep delays or `schedule` timers between standard `osascript` reads or fast operations.
+  - Reserve sleep timers exclusively for heavy, CPU-intensive operations (e.g., compiling Linux/FreeBSD kernels, formatting/populating raw UFS/ext4 disk images, or building packages).
+  - For quick terminal reads or status queries, inspect output immediately.
 
 ## Build System Conventions
 

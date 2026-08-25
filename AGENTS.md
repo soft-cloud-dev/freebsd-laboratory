@@ -27,6 +27,10 @@ bridge network. See `ARCHITECTURE.md` for the full trust model.
   ```
   For JupyterLab specifically, use `/home/freebsd/freebsd-laboratory/start-jupyter.sh`
   as the persistent launcher script (created during bootstrap).
+- **Sleep & Polling Timeout Efficiency**:
+  - Never introduce artificial sleep delays or `schedule` timers between standard `osascript` reads or fast operations.
+  - Reserve sleep timers exclusively for heavy, CPU-intensive operations (e.g., compiling Linux/FreeBSD kernels, formatting/populating raw UFS/ext4 disk images, or building packages).
+  - For quick terminal reads or status queries, inspect output immediately.
 
 ## Build System Conventions
 
