@@ -150,7 +150,12 @@ mkdir -p "${ROOT_STAGE}/home/freebsd/.ssh"
 echo "freebsd:x:1001:1001:FreeBSD Laboratory Guest:/home/freebsd:/bin/sh" >> "${ROOT_STAGE}/etc/passwd"
 echo "freebsd:x:1001:" >> "${ROOT_STAGE}/etc/group"
 echo "root::19800:0:99999:7:::" > "${ROOT_STAGE}/etc/shadow"
-echo "freebsd:!::0:::::" >> "${ROOT_STAGE}/etc/shadow"
+echo "freebsd:*::0:::::" >> "${ROOT_STAGE}/etc/shadow"
+
+# Ensure valid shells
+mkdir -p "${ROOT_STAGE}/etc"
+printf '/bin/sh\n/bin/ash\n/bin/bash\n' >> "${ROOT_STAGE}/etc/shells"
+sort -u -o "${ROOT_STAGE}/etc/shells" "${ROOT_STAGE}/etc/shells"
 
 # Hardened SSH daemon config
 mkdir -p "${ROOT_STAGE}/etc/ssh"
@@ -163,6 +168,7 @@ ChallengeResponseAuthentication no
 KbdInteractiveAuthentication no
 PubkeyAuthentication yes
 AuthorizedKeysFile .ssh/authorized_keys
+StrictModes no
 AllowTcpForwarding local
 X11Forwarding no
 AllowAgentForwarding no
