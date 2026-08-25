@@ -37,6 +37,10 @@ esac
 
 install -d -o root -g wheel -m 0755 "$VM_ROOT/.templates"
 install -o root -g wheel -m 0644 "$TEMPLATE_SOURCE" "$VM_ROOT/.templates/freebsd-lab.conf"
+if [ -f "$REPO_DIR/freebsd_laboratory/vm-bhyve/freebsd-lab-memdisk.conf" ]; then
+    install -o root -g wheel -m 0644 "$REPO_DIR/freebsd_laboratory/vm-bhyve/freebsd-lab-memdisk.conf" "$VM_ROOT/.templates/freebsd-lab-memdisk.conf"
+fi
 
 [ -r "$VM_ROOT/.templates/freebsd-lab.conf" ] || fail "installed template is not readable"
-printf 'Installed vm-bhyve template: %s\n' "$VM_ROOT/.templates/freebsd-lab.conf"
+printf 'Installed vm-bhyve templates in %s/.templates\n' "$VM_ROOT"
+

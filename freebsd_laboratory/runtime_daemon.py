@@ -60,9 +60,16 @@ class RuntimeConfig:
     jail_sshd_service: str = "/usr/sbin/service"
     vm_command: str = "/usr/local/sbin/vm"
     vm_template: str = "freebsd-lab"
+    vm_memdisk_template: str = "freebsd-lab-memdisk"
     vm_image: str = "freebsd-python.raw"
     vm_switch: str = "freebsdlab"
     vm_interface: str = "vtnet0"
+    vm_disk_backend: str = "zvol-clone"
+    vm_zvol_snapshot: str = "zroot/vm/.zvol/freebsd-python@ready"
+    vm_zvol_parent: str = "zroot/vm/.zvol"
+    vm_dataset_parent: str = "zroot/vm"
+    vm_disk_size: str = "8G"
+    vm_memdisk_type: str = "swap"
     ssh_public_key: str = "/usr/local/etc/freebsd-laboratory/id_ed25519.pub"
 
 
@@ -573,6 +580,9 @@ class RuntimeManager:
             **owner.registry_fields(),
             "guest_ip": address,
             "bridge": self.config.bridge_name,
+            "disk_backend": self.config.vm_disk_backend,
+            "md_unit": None,
+            "dataset": None,
             "vm_created": False,
         }
         self._write_registry(record)
@@ -587,22 +597,64 @@ class RuntimeManager:
                     f"hostname={name}",
                 ]
             )
-            self._run(
-                [
-                    self.config.vm_command,
-                    "create",
-                    "-t",
-                    self.config.vm_template,
-                    "-i",
-                    self.config.vm_image,
-                    "-C",
-                    "-k",
-                    str(temporary_public_key),
-                    "-n",
-                    netconfig,
-                    name,
-                ]
-            )
+            backend = self.config.vm_disk_backend
+            if backend == "zvol-clone" and self._snapshot_exists(self.config.vm_zvol_snapshot):
+                vm_dataset = f"{self.config.vm_dataset_parent}/{name}"
+                if not self._dataset_exists(vm_dataset):
+                    self._run(["zfs", "create", vm_dataset])
+                record["dataset"] = vm_dataset
+                self._write_registry(record)
+                self._run(["zfs", "clone", self.config.vm_zvol_snapshot, f"{vm_dataset}/disk0"])
+                self._run(
+                    [
+                        self.config.vm_command,
+                        "create",
+                        "-t",
+                        self.config.vm_template,
+                        "-C",
+                        "-k",
+                        str(temporary_public_key),
+                        "-n",
+                        netconfig,
+                        name,
+                    ]
+                )
+            elif backend == "memdisk":
+                md_unit = self._create_memdisk(name)
+                record["md_unit"] = md_unit
+                self._write_registry(record)
+                self._run(
+                    [
+                        self.config.vm_command,
+                        "create",
+                        "-t",
+                        self.config.vm_memdisk_template,
+                        "-C",
+                        "-k",
+                        str(temporary_public_key),
+                        "-n",
+                        netconfig,
+                        name,
+                    ]
+                )
+                self._configure_vm_memdisk(name, md_unit)
+            else:
+                self._run(
+                    [
+                        self.config.vm_command,
+                        "create",
+                        "-t",
+                        self.config.vm_template,
+                        "-i",
+                        self.config.vm_image,
+                        "-C",
+                        "-k",
+                        str(temporary_public_key),
+                        "-n",
+                        netconfig,
+                        name,
+                    ]
+                )
             record["vm_created"] = True
             self._write_registry(record)
             self._run([self.config.vm_command, "start", name])
@@ -620,6 +672,50 @@ class RuntimeManager:
         finally:
             if temporary_public_key is not None:
                 temporary_public_key.unlink(missing_ok=True)
+
+    def _snapshot_exists(self, snapshot: str) -> bool:
+        if not snapshot or "@" not in snapshot:
+            return False
+        return (
+            self._run(
+                ["zfs", "list", "-H", "-o", "name", "-t", "snapshot", snapshot],
+                check=False,
+            ).returncode
+            == 0
+        )
+
+    def _create_memdisk(self, name: str) -> str:
+        result = self._run(
+            ["mdconfig", "-a", "-t", self.config.vm_memdisk_type, "-s", self.config.vm_disk_size]
+        )
+        output = result.stdout.strip()
+        match = re.search(r"(?:^|/dev/)?(md\d+)$", output)
+        if not match:
+            raise RuntimeError(f"Unexpected mdconfig output: {output}")
+        md_unit = match.group(1)
+
+        if self._snapshot_exists(self.config.vm_zvol_snapshot):
+            tmp_src = f"{self.config.vm_zvol_parent}/{name}-src"
+            if self._dataset_exists(tmp_src):
+                self._run(["zfs", "destroy", "-r", "-f", tmp_src], check=False)
+            self._run(["zfs", "clone", self.config.vm_zvol_snapshot, tmp_src])
+            try:
+                self._run(["dd", f"if=/dev/zvol/{tmp_src}", f"of=/dev/{md_unit}", "bs=1M", "status=none"])
+            finally:
+                self._run(["zfs", "destroy", "-r", "-f", tmp_src], check=False)
+        elif Path(self.config.vm_image).is_file():
+            self._run(["dd", f"if={self.config.vm_image}", f"of=/dev/{md_unit}", "bs=1M", "status=none"])
+        return md_unit
+
+    def _configure_vm_memdisk(self, name: str, md_unit: str) -> None:
+        self._run([self.config.vm_command, "set", name, f"disk0_name=/dev/{md_unit}"], check=False)
+        self._run([self.config.vm_command, "set", name, "disk0_dev=custom"], check=False)
+
+    def _md_exists(self, md_unit: str) -> bool:
+        if not isinstance(md_unit, str) or not re.fullmatch(r"md\d+", md_unit):
+            return False
+        result = self._run(["mdconfig", "-l", "-u", md_unit[2:]], check=False)
+        return result.returncode == 0
 
     def _jail_exists(self, name: str) -> bool:
         return self._run(["jls", "-j", name, "name"], check=False).returncode == 0
@@ -660,6 +756,21 @@ class RuntimeManager:
             if result.returncode == 0:
                 removed.append("bhyve")
 
+        md_unit = record.get("md_unit")
+        if isinstance(md_unit, str) and re.fullmatch(r"md\d+", md_unit):
+            unit_num = md_unit[2:]
+            result = self._run(["mdconfig", "-d", "-u", unit_num], check=False)
+            if result.returncode == 0:
+                removed.append(md_unit)
+
+        vm_dataset = record.get("dataset")
+        if isinstance(vm_dataset, str) and self._dataset_exists(vm_dataset):
+            result = self._run(
+                ["zfs", "destroy", "-r", "-f", vm_dataset], check=False, timeout=60
+            )
+            if result.returncode == 0:
+                removed.append(vm_dataset)
+
         if runtime_type == "jail" or self._jail_exists(name):
             result = self._run(["jail", "-r", name], check=False, timeout=30)
             if result.returncode == 0:
@@ -690,12 +801,17 @@ class RuntimeManager:
             and self._interface_exists(epair_host)
         ):
             remaining.append(epair_host)
+        if isinstance(md_unit, str) and re.fullmatch(r"md\d+", md_unit) and self._md_exists(md_unit):
+            remaining.append(md_unit)
+        if isinstance(vm_dataset, str) and self._dataset_exists(vm_dataset):
+            remaining.append(vm_dataset)
         if self._dataset_exists(dataset):
             remaining.append(dataset)
         if remaining:
             raise RuntimeError(
                 f"Runtime cleanup incomplete for {name}: {', '.join(remaining)}"
             )
+
 
         guest_ip = record.get("guest_ip")
         if isinstance(guest_ip, str) and guest_ip:
@@ -978,8 +1094,26 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--jail-ssh-user", default="freebsd")
     parser.add_argument("--vm-command", default="/usr/local/sbin/vm")
     parser.add_argument("--vm-template", default="freebsd-lab")
+    parser.add_argument("--vm-memdisk-template", default="freebsd-lab-memdisk")
     parser.add_argument("--vm-image", default="freebsd-python.raw")
     parser.add_argument("--vm-switch", default="freebsdlab")
+    parser.add_argument(
+        "--vm-disk-backend",
+        default="zvol-clone",
+        choices=["zvol-clone", "memdisk", "legacy"],
+    )
+    parser.add_argument(
+        "--vm-zvol-snapshot",
+        default="zroot/vm/.zvol/freebsd-python@ready",
+    )
+    parser.add_argument("--vm-zvol-parent", default="zroot/vm/.zvol")
+    parser.add_argument("--vm-dataset-parent", default="zroot/vm")
+    parser.add_argument("--vm-disk-size", default="8G")
+    parser.add_argument(
+        "--vm-memdisk-type",
+        default="swap",
+        choices=["swap", "malloc"],
+    )
     parser.add_argument(
         "--ssh-public-key",
         default="/usr/local/etc/freebsd-laboratory/id_ed25519.pub",
@@ -1011,8 +1145,15 @@ def main() -> None:
         jail_ssh_user=args.jail_ssh_user,
         vm_command=args.vm_command,
         vm_template=args.vm_template,
+        vm_memdisk_template=args.vm_memdisk_template,
         vm_image=args.vm_image,
         vm_switch=args.vm_switch,
+        vm_disk_backend=args.vm_disk_backend,
+        vm_zvol_snapshot=args.vm_zvol_snapshot,
+        vm_zvol_parent=args.vm_zvol_parent,
+        vm_dataset_parent=args.vm_dataset_parent,
+        vm_disk_size=args.vm_disk_size,
+        vm_memdisk_type=args.vm_memdisk_type,
         ssh_public_key=args.ssh_public_key,
     )
     manager = RuntimeManager(config)
