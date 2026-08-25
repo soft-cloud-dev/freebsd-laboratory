@@ -140,7 +140,7 @@ cat > "${ROOT_STAGE}/etc/inittab" <<'EOF'
 ::sysinit:/sbin/openrc sysinit
 ::sysinit:/sbin/openrc boot
 ::wait:/sbin/openrc default
-ttyS0::respawn:/sbin/getty -n -l /bin/sh 115200 ttyS0 vt100
+ttyS0::respawn:/bin/sh
 ::ctrlaltdel:/sbin/reboot
 ::shutdown:/sbin/openrc shutdown
 EOF
@@ -241,9 +241,9 @@ start() {
             ip addr add "$IP" dev "$IFACE" 2>/dev/null || ifconfig "$IFACE" "${IP%/*}" netmask 255.255.255.0 2>/dev/null || true
         fi
 
-        # Parse user-data for SSH authorized keys (strip leading YAML bullet if present)
+        # Parse user-data for SSH authorized keys
         if [ -f /mnt/seed/user-data ]; then
-            grep -E 'ssh-ed25519|ssh-rsa' /mnt/seed/user-data | sed -E 's/^[[:space:]]*-[[:space:]]*//' > /home/freebsd/.ssh/authorized_keys 2>/dev/null || true
+            awk '/ssh-ed25519|ssh-rsa/ {for(i=1;i<=NF;i++) if($i ~ /^ssh-/) {print substr($0, index($0, $i)); break}}' /mnt/seed/user-data > /home/freebsd/.ssh/authorized_keys 2>/dev/null || true
             chmod 0600 /home/freebsd/.ssh/authorized_keys
             chown freebsd:freebsd /home/freebsd/.ssh/authorized_keys
         fi
