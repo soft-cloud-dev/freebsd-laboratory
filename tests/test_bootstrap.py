@@ -249,3 +249,9 @@ def test_bootstrap_validates_pf_before_installing_ruleset() -> None:
     assert text.index('pfctl -nf "$PF_TMP"') < text.index(
         'install -m 0600 "$PF_TMP" "$LAB_PF_CONF"'
     )
+
+
+def test_bootstrap_configures_private_bhyve_switch() -> None:
+    text = bootstrap_text()
+    assert "vm switch private freebsdlab on" in text
+    assert text.index("vm switch create") < text.index("vm switch private freebsdlab on")
