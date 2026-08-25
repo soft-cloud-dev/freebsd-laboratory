@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import base64
+import subprocess
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from typing import Sequence
 
 import pytest
 
@@ -268,3 +270,202 @@ def test_missing_optional_command_is_nonfatal_when_check_is_false() -> None:
     result = RuntimeManager._run(["/definitely/missing-command"], check=False)
 
     assert result.returncode == 127
+
+
+def test_bhyve_config_defaults_include_speed_backends() -> None:
+    config = RuntimeConfig()
+    assert config.vm_disk_backend == "zvol-clone"
+    assert config.vm_zvol_snapshot == "zroot/vm/.zvol/freebsd-python@ready"
+    assert config.vm_zvol_parent == "zroot/vm/.zvol"
+    assert config.vm_dataset_parent == "zroot/vm"
+    assert config.vm_memdisk_template == "freebsd-lab-memdisk"
+    assert config.vm_disk_size == "8G"
+    assert config.vm_memdisk_type == "swap"
+
+
+def test_build_parser_accepts_disk_backend_flags() -> None:
+    parser = runtime_daemon.build_parser()
+    args = parser.parse_args([
+        "--vm-disk-backend", "memdisk",
+        "--vm-zvol-snapshot", "zroot/custom@ready",
+        "--vm-disk-size", "4G",
+        "--vm-memdisk-type", "malloc",
+    ])
+    assert args.vm_disk_backend == "memdisk"
+    assert args.vm_zvol_snapshot == "zroot/custom@ready"
+    assert args.vm_disk_size == "4G"
+    assert args.vm_memdisk_type == "malloc"
+
+
+def test_create_bhyve_zvol_clone_backend(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manager = make_manager(tmp_path, vm_command="/bin/true")
+    name = "freebsd-lab-clone1"
+    key = ed25519_public_key()
+    peer = PeerCredentials(pid=100, uid=1000, gid=1000)
+    identity = ProcessIdentity(
+        pid=100,
+        uid=1000,
+        started_at="Mon Jan 1 00:00:00 2026",
+        digest="a" * 64,
+    )
+    monkeypatch.setattr(runtime_daemon, "query_process_identity", lambda pid: identity)
+
+    commands_run: list[list[str]] = []
+
+    def fake_run(cmd: Sequence[str], *, check: bool = True, timeout: float | None = 60) -> subprocess.CompletedProcess[str]:
+        cmd_list = list(cmd)
+        commands_run.append(cmd_list)
+        if "list" in cmd_list and "-t" in cmd_list and "snapshot" in cmd_list:
+            return subprocess.CompletedProcess(cmd_list, 0, "zroot/vm/.zvol/freebsd-python@ready\n", "")
+        if "info" in cmd_list:
+            return subprocess.CompletedProcess(cmd_list, 1, "", "")
+        return subprocess.CompletedProcess(cmd_list, 0, "", "")
+
+    monkeypatch.setattr(manager, "_run", fake_run)
+    monkeypatch.setattr(manager, "_require_vm_backend", lambda: None)
+    monkeypatch.setattr(manager, "_ensure_bridge", lambda: None)
+    monkeypatch.setattr(manager, "_ensure_vm_switch", lambda: None)
+
+    result = manager.create_bhyve(name, 100, peer, key)
+    assert result["name"] == name
+    assert result["type"] == "bhyve"
+
+    record = manager._load_registry(name)
+    assert record is not None
+    assert record["disk_backend"] == "zvol-clone"
+    assert record["dataset"] == f"zroot/vm/{name}"
+    assert record["vm_created"] is True
+
+    # Verify zfs clone and vm create without -i was invoked
+    flattened = [" ".join(c) for c in commands_run]
+    assert any("zfs clone zroot/vm/.zvol/freebsd-python@ready zroot/vm/freebsd-lab-clone1/disk0" in cmd for cmd in flattened)
+    assert any("/bin/true create -t freebsd-lab -C" in cmd and "-i" not in cmd for cmd in flattened)
+
+
+def test_create_bhyve_memdisk_backend(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = RuntimeConfig(
+        registry_dir=str(tmp_path / "registry"),
+        lease_dir=str(tmp_path / "leases"),
+        network_cidr="172.31.254.0/24",
+        host_address="172.31.254.1",
+        address_start="172.31.254.10",
+        address_end="172.31.254.20",
+        vm_command="/bin/true",
+        vm_disk_backend="memdisk",
+    )
+    manager = PortableRuntimeManager(config)
+    name = "freebsd-lab-mem1"
+    key = ed25519_public_key()
+    peer = PeerCredentials(pid=100, uid=1000, gid=1000)
+    identity = ProcessIdentity(
+        pid=100,
+        uid=1000,
+        started_at="Mon Jan 1 00:00:00 2026",
+        digest="a" * 64,
+    )
+    monkeypatch.setattr(runtime_daemon, "query_process_identity", lambda pid: identity)
+
+    commands_run: list[list[str]] = []
+
+    def fake_run(cmd: Sequence[str], *, check: bool = True, timeout: float | None = 60) -> subprocess.CompletedProcess[str]:
+        cmd_list = list(cmd)
+        commands_run.append(cmd_list)
+        if "mdconfig" in cmd_list and "-a" in cmd_list:
+            return subprocess.CompletedProcess(cmd_list, 0, "md3\n", "")
+        if "info" in cmd_list:
+            return subprocess.CompletedProcess(cmd_list, 1, "", "")
+        if "list" in cmd_list and "snapshot" in cmd_list:
+            return subprocess.CompletedProcess(cmd_list, 0, "zroot/vm/.zvol/freebsd-python@ready\n", "")
+        return subprocess.CompletedProcess(cmd_list, 0, "", "")
+
+    monkeypatch.setattr(manager, "_run", fake_run)
+    monkeypatch.setattr(manager, "_require_vm_backend", lambda: None)
+    monkeypatch.setattr(manager, "_ensure_bridge", lambda: None)
+    monkeypatch.setattr(manager, "_ensure_vm_switch", lambda: None)
+
+    result = manager.create_bhyve(name, 100, peer, key)
+    assert result["name"] == name
+    assert result["type"] == "bhyve"
+
+    record = manager._load_registry(name)
+    assert record is not None
+    assert record["disk_backend"] == "memdisk"
+    assert record["md_unit"] == "md3"
+
+    flattened = [" ".join(c) for c in commands_run]
+    assert any("mdconfig -a -t swap -s 8G" in cmd for cmd in flattened)
+    assert any("dd if=/dev/zvol/zroot/vm/.zvol/freebsd-lab-mem1-src of=/dev/md3" in cmd for cmd in flattened)
+    assert any("/bin/true create -t freebsd-lab-memdisk -C" in cmd for cmd in flattened)
+    assert any("/bin/true set freebsd-lab-mem1 disk0_name=/dev/md3" in cmd for cmd in flattened)
+
+
+def test_destroy_cleans_up_md_unit_and_dataset(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = RuntimeConfig(
+        registry_dir=str(tmp_path / "registry"),
+        lease_dir=str(tmp_path / "leases"),
+        network_cidr="172.31.254.0/24",
+        host_address="172.31.254.1",
+        address_start="172.31.254.10",
+        address_end="172.31.254.20",
+        vm_command="/bin/true",
+    )
+    manager = RuntimeManager(config)
+    name = "freebsd-lab-memcleanup"
+    record = {
+        "schema": "softcloud.runtime/v1",
+        "name": name,
+        "type": "bhyve",
+        "owner_pid": 100,
+        "owner_uid": 1000,
+        "owner_gid": 1000,
+        "owner_started_at": "Mon Jan 1 00:00:00 2026",
+        "owner_process_digest": "a" * 64,
+        "guest_ip": "172.31.254.10",
+        "bridge": "labbridge0",
+        "disk_backend": "memdisk",
+        "md_unit": "md5",
+        "dataset": f"zroot/vm/{name}",
+        "vm_created": True,
+    }
+    manager._write_registry(record)
+
+    existing_datasets = {f"zroot/vm/{name}"}
+    commands_run: list[list[str]] = []
+
+    def fake_run(cmd: Sequence[str], *, check: bool = True, timeout: float | None = 60) -> subprocess.CompletedProcess[str]:
+
+        cmd_list = list(cmd)
+        commands_run.append(cmd_list)
+        if "zfs" in cmd_list and "destroy" in cmd_list:
+            for d in list(existing_datasets):
+                if d in cmd_list:
+                    existing_datasets.discard(d)
+        return subprocess.CompletedProcess(cmd_list, 0, "", "")
+
+    monkeypatch.setattr(manager, "_run", fake_run)
+    monkeypatch.setattr(manager, "_vm_available", lambda: True)
+    monkeypatch.setattr(manager, "_vm_exists", lambda n: False)
+    monkeypatch.setattr(manager, "_jail_exists", lambda n: False)
+    monkeypatch.setattr(manager, "_interface_exists", lambda i: False)
+    monkeypatch.setattr(manager, "_dataset_exists", lambda d: d in existing_datasets)
+    monkeypatch.setattr(manager, "_md_exists", lambda u: False)
+
+
+    result = manager.destroy(name, requester_uid=1000)
+    assert result["name"] == name
+    assert "md5" in result["removed"]
+    assert f"zroot/vm/{name}" in result["removed"]
+
+    flattened = [" ".join(c) for c in commands_run]
+    assert any("mdconfig -d -u 5" in cmd for cmd in flattened)
+    assert any(f"zfs destroy -r -f zroot/vm/{name}" in cmd for cmd in flattened)
+
