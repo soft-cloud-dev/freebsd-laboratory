@@ -125,6 +125,12 @@ sed -i '' -e 's/sed-voffset := -e/sed-voffset := -E -e/' \
           -e 's/\\(_text\\|__start_rodata\\|__bss_start\\|_end\\)/(_text|__start_rodata|__bss_start|_end)/' \
           arch/x86/boot/compressed/Makefile
 
+# FreeBSD host compatibility: fix sed-zoffset regex in arch/x86/boot/Makefile for BSD sed
+sed -i '' -e 's/sed-zoffset := -e/sed-zoffset := -E -e/' \
+          -e 's/\\(\[0-9a-fA-F\]\*\\)/([0-9a-fA-F]*)/' \
+          -e 's/\\(startup_32\\|efi.._stub_entry\\|efi\\(32\\)\\?_pe_entry\\|input_data\\|kernel_info\\|_end\\|_ehead\\|_text\\|_e\\?data\\|z_.\*\\)/(startup_32|efi.._stub_entry|efi(32)?_pe_entry|input_data|kernel_info|_end|_ehead|_text|_e?data|z_.*)/' \
+          arch/x86/boot/Makefile
+
 cp "$KERNEL_CONFIG" .config
 
 HOST_EXTRACFLAGS="-I${SOURCE_DIR}/tools/include -DR_X86_64_JUMP_SLOT=7 -Wno-macro-redefined"
