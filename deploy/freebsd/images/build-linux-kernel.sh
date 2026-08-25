@@ -50,6 +50,20 @@ if [ -f arch/x86/tools/relocs.h ] && ! grep -q 'R_X86_64_JUMP_SLOT' arch/x86/too
     printf '\n#ifndef R_X86_64_JUMP_SLOT\n#define R_X86_64_JUMP_SLOT 7\n#endif\n' >> arch/x86/tools/relocs.h
 fi
 
+# FreeBSD host compatibility: provide asm/types.h for tools/ and scripts/
+mkdir -p tools/include/asm
+if [ ! -f tools/include/asm/types.h ]; then
+    cat > tools/include/asm/types.h <<'EOF'
+#ifndef _ASM_TYPES_H
+#define _ASM_TYPES_H
+#include <uapi/asm-generic/types.h>
+#endif
+EOF
+fi
+
+# FreeBSD host compatibility: fix BSD install flag ordering in tools Makefiles
+find tools -name Makefile -exec sed -i '' -e 's/\$(INSTALL) \$1 \$(if \$3,-m \$3,)/\$(INSTALL) \$(if \$3,-m \$3,) \$1/g' {} + 2>/dev/null || true
+
 cp "$KERNEL_CONFIG" .config
 
 HOST_FLAGS='HOST_EXTRACFLAGS=-DR_X86_64_JUMP_SLOT=7 -Wno-macro-redefined KBUILD_HOSTCFLAGS=-DR_X86_64_JUMP_SLOT=7 -Wno-macro-redefined'
