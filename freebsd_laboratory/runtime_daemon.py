@@ -616,7 +616,10 @@ class RuntimeManager:
                         name,
                     ]
                 )
+                if self._dataset_exists(f"{vm_dataset}/disk0"):
+                    self._run(["zfs", "destroy", "-f", f"{vm_dataset}/disk0"])
                 self._run(["zfs", "clone", self.config.vm_zvol_snapshot, f"{vm_dataset}/disk0"])
+
             elif backend == "memdisk":
                 md_unit = self._create_memdisk(name)
                 record["md_unit"] = md_unit
