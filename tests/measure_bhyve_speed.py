@@ -18,7 +18,7 @@ async def run() -> None:
     urllib.request.install_opener(opener)
 
     # Establish session and obtain XSRF cookie if required
-    pre_req = urllib.request.Request(f"{BASE_URL}/api/status", headers={"Authorization": f"token {TOKEN}"})
+    pre_req = urllib.request.Request(f"{BASE_URL}/lab?token={TOKEN}")
     try:
         opener.open(pre_req)
     except Exception:
@@ -33,13 +33,16 @@ async def run() -> None:
         "Authorization": f"token {TOKEN}",
         "Content-Type": "application/json",
     }
+    url = f"{BASE_URL}/api/kernels"
     if xsrf:
         headers["X-XSRFToken"] = xsrf
+        headers["Cookie"] = f"_xsrf={xsrf}"
+        url = f"{url}?_xsrf={xsrf}"
 
     t0 = time.monotonic()
     print(f"Requesting {KERNEL_NAME} kernel...", flush=True)
     req = urllib.request.Request(
-        f"{BASE_URL}/api/kernels",
+        url,
         data=json.dumps({"name": KERNEL_NAME}).encode("utf-8"),
         headers=headers,
         method="POST",
