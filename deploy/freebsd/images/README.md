@@ -87,7 +87,7 @@ The wrapper uses one object root (`OBJ_ROOT`, defaulting to `/var/tmp/freebsd-la
 
 ## Package source
 
-The runtime package set is deliberately small. Builders install the repository's `python3` meta-package, then derive the matching `pyXY-ipykernel` (and, for bhyve, `pyXY-cloud-init`) package from that interpreter inside the target image. This avoids pinning a retired Python package flavor. Direct builder use can override `LAB_JAIL_PACKAGES`, `LAB_JAIL_IPYKERNEL_PACKAGE`, `LAB_VM_PACKAGES`, `LAB_VM_IPYKERNEL_PACKAGE`, or `LAB_VM_CLOUD_INIT_PACKAGE`.
+The runtime package set is deliberately small. Builders install the repository's `python3` meta-package, then derive the matching `pyXY-ipykernel` package from that interpreter inside the target image. This avoids pinning a retired Python package flavor. Direct builder use can override `LAB_JAIL_PACKAGES`, `LAB_JAIL_IPYKERNEL_PACKAGE`, `LAB_VM_PACKAGES`, or `LAB_VM_IPYKERNEL_PACKAGE`.
 
 For controlled package provenance, point `LAB_PKG_REPOS_DIR` at a root-owned directory containing pkg repository configuration files for the laboratory's Poudriere repository. If it is unset, the host's normal pkg repository configuration is used.
 
@@ -106,7 +106,7 @@ Do not destroy an older snapshot while active ZFS clones still depend on it.
 
 ## bhyve image
 
-`build-bhyve-image.sh` remains source-based. It drives the FreeBSD release `vm-image` target with raw/UFS output and `vmimage.conf`. The configuration adds Python, ipykernel, cloud-init support, the `freebsd` account, and the restricted SSH policy before the image is unmounted. FreeBSD's native `nuageinit` service processes vm-bhyve's NoCloud seed, including `network-config` and SSH authorized keys. The image enables `nuageinit`, not the Python package's `cloudinit` rc service. It pre-creates `freebsd`'s `authorized_keys` with that user's numeric UID/GID because nuageinit otherwise creates the file as root and sshd rejects it under strict modes. It also pre-creates the target `/usr/local/lib` directory before FreeBSD's initial linker-cache setup, then runs `ldconfig forcestart` after each package-installation phase before executing the target Python interpreter.
+`build-bhyve-image.sh` remains source-based. It drives the FreeBSD release `vm-image` target with raw/UFS output and `vmimage.conf`. The configuration adds Python, ipykernel, the `freebsd` account, and the restricted SSH policy before the image is unmounted. FreeBSD's native `nuageinit` service processes vm-bhyve's NoCloud seed, including `network-config` and SSH authorized keys. The image enables native `nuageinit`. It pre-creates `freebsd`'s `authorized_keys` with that user's numeric UID/GID because nuageinit otherwise creates the file as root and sshd rejects it under strict modes. It also pre-creates the target `/usr/local/lib` directory before FreeBSD's initial linker-cache setup, then runs `ldconfig forcestart` after each package-installation phase before executing the target Python interpreter.
 
 The builder fails closed unless the selected FreeBSD source revision exposes `VM_IMAGE_CONFIG` in `release/Makefile.vm`. Without that support, `make vm-image` would ignore the laboratory customization file and could produce an apparently valid but unusable base image.
 

@@ -5,6 +5,7 @@ import os
 import re
 import shlex
 import shutil
+import socket
 import subprocess
 import time
 from dataclasses import dataclass
@@ -126,11 +127,13 @@ class SSHTransport:
         *,
         check: bool = True,
         timeout: float | None = None,
+        input: str | None = None,
     ) -> subprocess.CompletedProcess[str]:
         normalized = list(command)
         try:
             result = subprocess.run(
                 normalized,
+                input=input,
                 capture_output=True,
                 text=True,
                 check=False,
@@ -147,6 +150,13 @@ class SSHTransport:
             raise RuntimeError(f"{shlex.join(normalized)}: {detail}")
         return result
 
+    def _probe_tcp(self, timeout: float = 0.5) -> bool:
+        try:
+            with socket.create_connection((self.host, 22), timeout=timeout):
+                return True
+        except (OSError, TimeoutError):
+            return False
+
     def wait_until_ready(self, timeout: int) -> None:
         if isinstance(timeout, bool) or not isinstance(timeout, int) or timeout <= 0:
             raise ValueError("timeout must be a positive integer")
@@ -158,6 +168,10 @@ class SSHTransport:
         )
         while time.monotonic() < deadline:
             remaining = deadline - time.monotonic()
+            if not self._probe_tcp(timeout=min(0.5, remaining)):
+                last_detail = f"TCP port 22 not yet open on {self.host}"
+                time.sleep(min(0.25, max(0, deadline - time.monotonic())))
+                continue
             try:
                 result = self._run(
                     self.command("true"),
@@ -168,12 +182,12 @@ class SSHTransport:
                 if not str(error).startswith("Command timed out:"):
                     raise
                 last_detail = str(error)
-                time.sleep(min(1, max(0, deadline - time.monotonic())))
+                time.sleep(min(0.5, max(0, deadline - time.monotonic())))
                 continue
             if result.returncode == 0:
                 return
             last_detail = result.stderr.strip() or result.stdout.strip() or last_detail
-            time.sleep(min(1, max(0, deadline - time.monotonic())))
+            time.sleep(min(0.5, max(0, deadline - time.monotonic())))
         raise RuntimeError(f"Timed out waiting for {self.target} SSH: {last_detail}")
 
     def stage(self, host_path: Path, remote_dir: str) -> str:
@@ -184,17 +198,14 @@ class SSHTransport:
         if not isinstance(remote_dir, str) or not remote_dir.startswith("/"):
             raise ValueError(f"remote_dir must be an absolute path: {remote_dir}")
         remote_path = f"{remote_dir.rstrip('/')}/{host_path.name}"
+        content = host_path.read_text(encoding="utf-8")
+        quoted_dir = shlex.quote(remote_dir)
+        quoted_path = shlex.quote(remote_path)
         self._run(
-            self.command(f"install -d -m 700 {shlex.quote(remote_dir)}"),
-            timeout=15,
-        )
-        self._run(
-            [
-                self.scp_command,
-                *self.options(),
-                str(host_path),
-                f"{self.target}:{remote_path}",
-            ],
+            self.command(
+                f"install -d -m 700 {quoted_dir} && cat > {quoted_path} && chmod 600 {quoted_path}"
+            ),
+            input=content,
             timeout=15,
         )
         return remote_path

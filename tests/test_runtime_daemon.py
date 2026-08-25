@@ -279,7 +279,7 @@ def test_bhyve_config_defaults_include_speed_backends() -> None:
     assert config.vm_zvol_parent == "zroot/vm/.zvol"
     assert config.vm_dataset_parent == "zroot/vm"
     assert config.vm_memdisk_template == "freebsd-lab-memdisk"
-    assert config.vm_disk_size == "8G"
+    assert config.vm_disk_size == "3G"
     assert config.vm_memdisk_type == "swap"
 
 
@@ -400,7 +400,7 @@ def test_create_bhyve_memdisk_backend(
     assert record["md_unit"] == "md3"
 
     flattened = [" ".join(c) for c in commands_run]
-    assert any("mdconfig -a -t swap -s 8G" in cmd for cmd in flattened)
+    assert any("mdconfig -a -t swap -s 3G" in cmd for cmd in flattened)
     assert any("dd if=/dev/zvol/zroot/vm/.zvol/freebsd-lab-mem1-src of=/dev/md3" in cmd for cmd in flattened)
     assert any("/bin/true create -t freebsd-lab-memdisk -C" in cmd for cmd in flattened)
     assert any("/bin/true set freebsd-lab-mem1 disk0_name=/dev/md3" in cmd for cmd in flattened)

@@ -36,7 +36,14 @@ MAX_REQUEST_BYTES = 64 * 1024
 def _serialized_lifecycle(method: Any) -> Any:
     @wraps(method)
     def wrapped(self: "RuntimeManager", *args: Any, **kwargs: Any) -> Any:
-        with self._lifecycle_lock:
+        if method.__name__ == "gc":
+            with self._shared_lock:
+                return method(self, *args, **kwargs)
+        if args and isinstance(args[0], str):
+            name = args[0]
+            with self._runtime_lock(name):
+                return method(self, *args, **kwargs)
+        with self._shared_lock:
             return method(self, *args, **kwargs)
 
     return wrapped
@@ -69,7 +76,7 @@ class RuntimeConfig:
     vm_zvol_snapshot: str = "zroot/vm/.zvol/freebsd-python@ready"
     vm_zvol_parent: str = "zroot/vm/.zvol"
     vm_dataset_parent: str = "zroot/vm"
-    vm_disk_size: str = "8G"
+    vm_disk_size: str = "3G"
     vm_memdisk_type: str = "swap"
     ssh_public_key: str = "/usr/local/etc/freebsd-laboratory/id_ed25519.pub"
 
@@ -127,7 +134,11 @@ class RuntimeManager:
 
     def __init__(self, config: RuntimeConfig) -> None:
         self.config = config
-        self._lifecycle_lock = threading.RLock()
+        self._shared_lock = threading.RLock()
+        self._runtime_locks: dict[str, threading.Lock] = {}
+        self._locks_mutex = threading.Lock()
+        self._bridge_configured: bool = False
+        self._vm_switch_configured: bool = False
         self.registry_dir = Path(config.registry_dir)
         self.registry_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
         self.pool = IPv4LeasePool(
@@ -141,6 +152,14 @@ class RuntimeManager:
             config.network_cidr, strict=False
         ):
             raise ValueError("host_address must be contained in network_cidr")
+
+    def _runtime_lock(self, name: str) -> threading.Lock:
+        with self._locks_mutex:
+            lock = self._runtime_locks.get(name)
+            if lock is None:
+                lock = threading.Lock()
+                self._runtime_locks[name] = lock
+            return lock
 
     @staticmethod
     def validate_name(name: str) -> str:
@@ -341,47 +360,59 @@ class RuntimeManager:
             )
 
     def _ensure_bridge(self) -> None:
-        result = self._run(["ifconfig", self.config.bridge_name], check=False)
-        if result.returncode != 0:
-            self._run(["ifconfig", "bridge", "create", "name", self.config.bridge_name])
-            result = self._run(["ifconfig", self.config.bridge_name])
+        if self._bridge_configured:
+            return
+        with self._shared_lock:
+            if self._bridge_configured:
+                return
+            result = self._run(["ifconfig", self.config.bridge_name], check=False)
+            if result.returncode != 0:
+                self._run(["ifconfig", "bridge", "create", "name", self.config.bridge_name])
+                result = self._run(["ifconfig", self.config.bridge_name])
 
-        expected = f"inet {self.config.host_address} "
-        if expected not in result.stdout:
-            self._run(
-                [
-                    "ifconfig",
-                    self.config.bridge_name,
-                    "inet",
-                    f"{self.config.host_address}/{self.prefix_len}",
-                    "up",
-                ]
-            )
-        else:
-            self._run(["ifconfig", self.config.bridge_name, "up"])
+            expected = f"inet {self.config.host_address} "
+            if expected not in result.stdout:
+                self._run(
+                    [
+                        "ifconfig",
+                        self.config.bridge_name,
+                        "inet",
+                        f"{self.config.host_address}/{self.prefix_len}",
+                        "up",
+                    ]
+                )
+            else:
+                self._run(["ifconfig", self.config.bridge_name, "up"])
+            self._bridge_configured = True
 
     def _ensure_vm_switch(self) -> None:
-        self._require_vm_backend()
-        result = self._run(
-            [self.config.vm_command, "switch", "info", self.config.vm_switch],
-            check=False,
-        )
-        if result.returncode != 0:
-            self._run(
-                [
-                    self.config.vm_command,
-                    "switch",
-                    "create",
-                    "-t",
-                    "manual",
-                    "-b",
-                    self.config.bridge_name,
-                    self.config.vm_switch,
-                ]
+        if self._vm_switch_configured:
+            return
+        with self._shared_lock:
+            if self._vm_switch_configured:
+                return
+            self._require_vm_backend()
+            result = self._run(
+                [self.config.vm_command, "switch", "info", self.config.vm_switch],
+                check=False,
             )
-        self._run(
-            [self.config.vm_command, "switch", "private", self.config.vm_switch, "on"]
-        )
+            if result.returncode != 0:
+                self._run(
+                    [
+                        self.config.vm_command,
+                        "switch",
+                        "create",
+                        "-t",
+                        "manual",
+                        "-b",
+                        self.config.bridge_name,
+                        self.config.vm_switch,
+                    ]
+                )
+            self._run(
+                [self.config.vm_command, "switch", "private", self.config.vm_switch, "on"]
+            )
+            self._vm_switch_configured = True
 
     def _allocate(self, name: str) -> str:
         address = self.pool.allocate(name)
@@ -509,7 +540,6 @@ class RuntimeManager:
                 ]
             )
             record["dataset_created"] = True
-            self._write_registry(record)
             self._install_jail_authorized_key(jail_root, public_key)
 
             epair_result = self._run(["ifconfig", "epair", "create"])
@@ -519,7 +549,6 @@ class RuntimeManager:
             epair_guest = f"{epair_host[:-1]}b"
             record["epair_host"] = epair_host
             record["epair_guest"] = epair_guest
-            self._write_registry(record)
 
             self._run(["ifconfig", self.config.bridge_name, "addm", epair_host])
             self._run(["ifconfig", self.config.bridge_name, "private", epair_host])
@@ -540,39 +569,22 @@ class RuntimeManager:
                 ]
             )
             record["jail_created"] = True
-            self._write_registry(record)
 
             self._run(
                 [
                     "jexec",
                     name,
-                    "ifconfig",
-                    epair_guest,
-                    "name",
-                    self.config.jail_interface_name,
+                    "sh",
+                    "-c",
+                    (
+                        f"ifconfig {shlex.quote(epair_guest)} name {shlex.quote(self.config.jail_interface_name)} && "
+                        f"ifconfig {shlex.quote(self.config.jail_interface_name)} inet {shlex.quote(address)}/{self.prefix_len} up && "
+                        "ifconfig lo0 inet 127.0.0.1/8 up && "
+                        f"{shlex.quote(self.config.jail_sshd_service)} sshd onestart"
+                    ),
                 ]
             )
-            self._run(
-                [
-                    "jexec",
-                    name,
-                    "ifconfig",
-                    self.config.jail_interface_name,
-                    "inet",
-                    f"{address}/{self.prefix_len}",
-                    "up",
-                ]
-            )
-            self._configure_jail_loopback(name)
-            self._run(
-                [
-                    "jexec",
-                    name,
-                    self.config.jail_sshd_service,
-                    "sshd",
-                    "onestart",
-                ]
-            )
+            self._write_registry(record)
             return {
                 "name": name,
                 "type": "jail",
@@ -642,7 +654,6 @@ class RuntimeManager:
             if backend == "zvol-clone" and self._snapshot_exists(guest_profile.zvol_snapshot):
                 vm_dataset = f"{self.config.vm_dataset_parent}/{name}"
                 record["dataset"] = vm_dataset
-                self._write_registry(record)
                 self._run(
                     [
                         self.config.vm_command,
@@ -664,7 +675,6 @@ class RuntimeManager:
             elif backend == "memdisk":
                 md_unit = self._create_memdisk(name, guest_profile.zvol_snapshot, guest_profile.image)
                 record["md_unit"] = md_unit
-                self._write_registry(record)
                 self._run(
                     [
                         self.config.vm_command,
@@ -715,7 +725,7 @@ class RuntimeManager:
             self.destroy(name, force=True)
             raise
         finally:
-            if temporary_public_key is not None:
+            if temporary_public_key is not None and temporary_public_key.exists():
                 temporary_public_key.unlink(missing_ok=True)
 
     def _snapshot_exists(self, snapshot: str) -> bool:
@@ -1189,7 +1199,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--vm-zvol-parent", default="zroot/vm/.zvol")
     parser.add_argument("--vm-dataset-parent", default="zroot/vm")
-    parser.add_argument("--vm-disk-size", default="8G")
+    parser.add_argument("--vm-disk-size", default="3G")
     parser.add_argument(
         "--vm-memdisk-type",
         default="swap",
