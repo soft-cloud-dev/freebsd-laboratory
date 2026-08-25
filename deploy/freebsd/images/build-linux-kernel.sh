@@ -111,6 +111,12 @@ all:
 clean:
 EOF
 
+# FreeBSD host compatibility: fix sed-voffset regex in arch/x86/boot/compressed/Makefile for BSD sed
+sed -i '' -e 's/sed-voffset := -e/sed-voffset := -E -e/' \
+          -e 's/\\(\[0-9a-fA-F\]\*\\)/([0-9a-fA-F]*)/' \
+          -e 's/\\(_text\\|__start_rodata\\|__bss_start\\|_end\\)/(_text|__start_rodata|__bss_start|_end)/' \
+          arch/x86/boot/compressed/Makefile
+
 cp "$KERNEL_CONFIG" .config
 
 HOST_EXTRACFLAGS="-I${SOURCE_DIR}/tools/include -DR_X86_64_JUMP_SLOT=7 -Wno-macro-redefined"
