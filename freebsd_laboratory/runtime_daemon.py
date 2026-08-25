@@ -600,11 +600,8 @@ class RuntimeManager:
             backend = self.config.vm_disk_backend
             if backend == "zvol-clone" and self._snapshot_exists(self.config.vm_zvol_snapshot):
                 vm_dataset = f"{self.config.vm_dataset_parent}/{name}"
-                if not self._dataset_exists(vm_dataset):
-                    self._run(["zfs", "create", vm_dataset])
                 record["dataset"] = vm_dataset
                 self._write_registry(record)
-                self._run(["zfs", "clone", self.config.vm_zvol_snapshot, f"{vm_dataset}/disk0"])
                 self._run(
                     [
                         self.config.vm_command,
@@ -619,6 +616,7 @@ class RuntimeManager:
                         name,
                     ]
                 )
+                self._run(["zfs", "clone", self.config.vm_zvol_snapshot, f"{vm_dataset}/disk0"])
             elif backend == "memdisk":
                 md_unit = self._create_memdisk(name)
                 record["md_unit"] = md_unit
@@ -655,6 +653,7 @@ class RuntimeManager:
                         name,
                     ]
                 )
+
             record["vm_created"] = True
             self._write_registry(record)
             self._run([self.config.vm_command, "start", name])
