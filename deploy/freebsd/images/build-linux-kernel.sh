@@ -107,14 +107,15 @@ find tools -name Makefile -exec sed -i '' -e 's/\$(INSTALL) \$1 \$(if \$3,-m \$3
 
 cp "$KERNEL_CONFIG" .config
 
-HOST_FLAGS='HOST_EXTRACFLAGS=-DR_X86_64_JUMP_SLOT=7 -Wno-macro-redefined KBUILD_HOSTCFLAGS=-DR_X86_64_JUMP_SLOT=7 -Wno-macro-redefined'
+HOST_EXTRACFLAGS="-I${SOURCE_DIR}/tools/include -DR_X86_64_JUMP_SLOT=7 -Wno-macro-redefined"
+KBUILD_HOSTCFLAGS="-I${SOURCE_DIR}/tools/include -DR_X86_64_JUMP_SLOT=7 -Wno-macro-redefined"
 
 printf 'Validating Linux kernel configuration...\n'
-gmake LLVM=1 ARCH=x86_64 HOST_EXTRACFLAGS="-DR_X86_64_JUMP_SLOT=7 -Wno-macro-redefined" KBUILD_HOSTCFLAGS="-DR_X86_64_JUMP_SLOT=7 -Wno-macro-redefined" olddefconfig
+gmake LLVM=1 ARCH=x86_64 HOST_EXTRACFLAGS="$HOST_EXTRACFLAGS" KBUILD_HOSTCFLAGS="$KBUILD_HOSTCFLAGS" olddefconfig
 
 NPROC=$(sysctl -n hw.ncpu 2>/dev/null || nproc 2>/dev/null || echo 2)
 printf 'Compiling Linux kernel EFI stub with %s jobs...\n' "$NPROC"
-gmake LLVM=1 ARCH=x86_64 HOST_EXTRACFLAGS="-DR_X86_64_JUMP_SLOT=7 -Wno-macro-redefined" KBUILD_HOSTCFLAGS="-DR_X86_64_JUMP_SLOT=7 -Wno-macro-redefined" -j"$NPROC" bzImage
+gmake LLVM=1 ARCH=x86_64 HOST_EXTRACFLAGS="$HOST_EXTRACFLAGS" KBUILD_HOSTCFLAGS="$KBUILD_HOSTCFLAGS" -j"$NPROC" bzImage
 
 BZIMAGE="${SOURCE_DIR}/arch/x86/boot/bzImage"
 [ -f "$BZIMAGE" ] || fail "Kernel bzImage was not produced at $BZIMAGE"
