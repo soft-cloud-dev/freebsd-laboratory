@@ -52,3 +52,5 @@ def test_golden_images_derive_python_flavor_from_python3() -> None:
     assert "vm_pkg_audit || return 1" in vm_config
     assert "LAB_VM_AUDIT_ACCEPTED_IDS" in vm_config
     assert '"pkg_audit_enforced": ${LAB_VM_AUDIT_ENFORCED}' in vm_config
+    assert 'syslogd_flags="-ss"' in jail
+    assert 'syslogd_flags="-ss"' in vm_config

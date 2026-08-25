@@ -309,6 +309,9 @@ touch "$ROOT/etc/rc.conf"
 if ! grep -Eq '^sshd_enable=' "$ROOT/etc/rc.conf"; then
     printf 'sshd_enable="YES"\n' >> "$ROOT/etc/rc.conf"
 fi
+if ! grep -Eq '^syslogd_flags=' "$ROOT/etc/rc.conf"; then
+    printf 'syslogd_flags="-ss"\n' >> "$ROOT/etc/rc.conf"
+fi
 
 PYTHON_LDD=$(chroot "$ROOT" /usr/bin/ldd /usr/local/bin/python3 2>&1 || true)
 if printf '%s\n' "$PYTHON_LDD" | grep -q 'not found'; then
