@@ -439,8 +439,10 @@ def test_destroy_cleans_up_md_unit_and_dataset(
     manager._write_registry(record)
 
     existing_datasets = {f"zroot/vm/{name}"}
+    commands_run: list[list[str]] = []
 
     def fake_run(cmd: Sequence[str], *, check: bool = True, timeout: float | None = 60) -> subprocess.CompletedProcess[str]:
+
         cmd_list = list(cmd)
         commands_run.append(cmd_list)
         if "zfs" in cmd_list and "destroy" in cmd_list:
