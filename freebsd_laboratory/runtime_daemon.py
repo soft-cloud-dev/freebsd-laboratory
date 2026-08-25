@@ -91,6 +91,36 @@ class RuntimeOwner:
         }
 
 
+@dataclass(frozen=True)
+class BhyveGuestProfile:
+    template: str
+    memdisk_template: str
+    image: str
+    zvol_snapshot: str
+    interface: str
+    guest_os: str = "freebsd"
+
+
+BHYVE_PROFILES: dict[str, BhyveGuestProfile] = {
+    "freebsd-python": BhyveGuestProfile(
+        template="freebsd-lab",
+        memdisk_template="freebsd-lab-memdisk",
+        image="freebsd-python.raw",
+        zvol_snapshot="zroot/vm/.zvol/freebsd-python@ready",
+        interface="vtnet0",
+        guest_os="freebsd",
+    ),
+    "linux-python": BhyveGuestProfile(
+        template="linux-lab",
+        memdisk_template="linux-lab-memdisk",
+        image="linux-python.raw",
+        zvol_snapshot="zroot/vm/.zvol/linux-python@ready",
+        interface="eth0",
+        guest_os="linux",
+    ),
+}
+
+
 class RuntimeManager:
     """Root-owned lifecycle manager with an authenticated, constrained API."""
 
@@ -560,9 +590,15 @@ class RuntimeManager:
         owner_pid: int,
         peer: PeerCredentials,
         ssh_public_key: str,
+        profile: str = "freebsd-python",
     ) -> dict[str, Any]:
         name = self.validate_name(name)
         public_key = self.validate_ssh_public_key(ssh_public_key)
+        if isinstance(profile, bool) or not isinstance(profile, str) or profile not in BHYVE_PROFILES:
+            raise ValueError(
+                f"Unknown bhyve guest profile: {profile!r}. Supported profiles: {sorted(BHYVE_PROFILES.keys())}"
+            )
+        guest_profile = BHYVE_PROFILES[profile]
         owner = self._owner_from_peer(peer, owner_pid)
         self._require_vm_backend()
         self._reconcile_registered_before_create(name, owner)
@@ -577,6 +613,8 @@ class RuntimeManager:
             "schema": "softcloud.runtime/v1",
             "name": name,
             "type": "bhyve",
+            "profile": profile,
+            "guest_os": guest_profile.guest_os,
             **owner.registry_fields(),
             "guest_ip": address,
             "bridge": self.config.bridge_name,
@@ -592,13 +630,13 @@ class RuntimeManager:
             temporary_public_key = self._write_runtime_public_key(name, public_key)
             netconfig = ";".join(
                 [
-                    f"interface={self.config.vm_interface}",
+                    f"interface={guest_profile.interface}",
                     f"ip={address}/{self.prefix_len}",
                     f"hostname={name}",
                 ]
             )
             backend = self.config.vm_disk_backend
-            if backend == "zvol-clone" and self._snapshot_exists(self.config.vm_zvol_snapshot):
+            if backend == "zvol-clone" and self._snapshot_exists(guest_profile.zvol_snapshot):
                 vm_dataset = f"{self.config.vm_dataset_parent}/{name}"
                 record["dataset"] = vm_dataset
                 self._write_registry(record)
@@ -607,7 +645,7 @@ class RuntimeManager:
                         self.config.vm_command,
                         "create",
                         "-t",
-                        self.config.vm_template,
+                        guest_profile.template,
                         "-C",
                         "-k",
                         str(temporary_public_key),
@@ -618,10 +656,10 @@ class RuntimeManager:
                 )
                 if self._dataset_exists(f"{vm_dataset}/disk0"):
                     self._run(["zfs", "destroy", "-f", f"{vm_dataset}/disk0"])
-                self._run(["zfs", "clone", self.config.vm_zvol_snapshot, f"{vm_dataset}/disk0"])
+                self._run(["zfs", "clone", guest_profile.zvol_snapshot, f"{vm_dataset}/disk0"])
 
             elif backend == "memdisk":
-                md_unit = self._create_memdisk(name)
+                md_unit = self._create_memdisk(name, guest_profile.zvol_snapshot, guest_profile.image)
                 record["md_unit"] = md_unit
                 self._write_registry(record)
                 self._run(
@@ -629,7 +667,7 @@ class RuntimeManager:
                         self.config.vm_command,
                         "create",
                         "-t",
-                        self.config.vm_memdisk_template,
+                        guest_profile.memdisk_template,
                         "-C",
                         "-k",
                         str(temporary_public_key),
@@ -645,9 +683,9 @@ class RuntimeManager:
                         self.config.vm_command,
                         "create",
                         "-t",
-                        self.config.vm_template,
+                        guest_profile.template,
                         "-i",
-                        self.config.vm_image,
+                        guest_profile.image,
                         "-C",
                         "-k",
                         str(temporary_public_key),
@@ -663,10 +701,12 @@ class RuntimeManager:
             return {
                 "name": name,
                 "type": "bhyve",
+                "profile": profile,
+                "guest_os": guest_profile.guest_os,
                 "guest_ip": address,
                 "network_cidr": self.config.network_cidr,
                 "bridge": self.config.bridge_name,
-                "interface": self.config.vm_interface,
+                "interface": guest_profile.interface,
             }
         except Exception:
             self.destroy(name, force=True)
@@ -686,7 +726,14 @@ class RuntimeManager:
             == 0
         )
 
-    def _create_memdisk(self, name: str) -> str:
+    def _create_memdisk(
+        self,
+        name: str,
+        snapshot: str | None = None,
+        image: str | None = None,
+    ) -> str:
+        snapshot = snapshot or self.config.vm_zvol_snapshot
+        image = image or self.config.vm_image
         result = self._run(
             ["mdconfig", "-a", "-t", self.config.vm_memdisk_type, "-s", self.config.vm_disk_size]
         )
@@ -696,17 +743,17 @@ class RuntimeManager:
             raise RuntimeError(f"Unexpected mdconfig output: {output}")
         md_unit = match.group(1)
 
-        if self._snapshot_exists(self.config.vm_zvol_snapshot):
+        if self._snapshot_exists(snapshot):
             tmp_src = f"{self.config.vm_zvol_parent}/{name}-src"
             if self._dataset_exists(tmp_src):
                 self._run(["zfs", "destroy", "-r", "-f", tmp_src], check=False)
-            self._run(["zfs", "clone", self.config.vm_zvol_snapshot, tmp_src])
+            self._run(["zfs", "clone", snapshot, tmp_src])
             try:
                 self._run(["dd", f"if=/dev/zvol/{tmp_src}", f"of=/dev/{md_unit}", "bs=1M", "status=none"])
             finally:
                 self._run(["zfs", "destroy", "-r", "-f", tmp_src], check=False)
-        elif Path(self.config.vm_image).is_file():
-            self._run(["dd", f"if={self.config.vm_image}", f"of=/dev/{md_unit}", "bs=1M", "status=none"])
+        elif Path(image).is_file():
+            self._run(["dd", f"if={image}", f"of=/dev/{md_unit}", "bs=1M", "status=none"])
         return md_unit
 
     def _configure_vm_memdisk(self, name: str, md_unit: str) -> None:
@@ -985,7 +1032,12 @@ class RuntimeRequestHandler(socketserver.StreamRequestHandler):
     ) -> dict[str, Any]:
         action = request.get("action")
         if action == "ping":
-            return {"service": "freebsd-laboratory-runtime", "version": 3}
+            return {
+                "service": "freebsd-laboratory-runtime",
+                "version": 4,
+                "capabilities": ["jail", "bhyve.freebsd", "bhyve.linux"],
+                "bhyve_profiles": sorted(BHYVE_PROFILES.keys()),
+            }
         if action == "create-jail":
             name = request.get("name")
             if not isinstance(name, str):
@@ -1012,11 +1064,15 @@ class RuntimeRequestHandler(socketserver.StreamRequestHandler):
             ssh_public_key = request.get("ssh_public_key")
             if not isinstance(ssh_public_key, str):
                 raise ValueError("ssh_public_key must be a string")
+            profile = request.get("profile", "freebsd-python")
+            if isinstance(profile, bool) or not isinstance(profile, str):
+                raise ValueError("profile must be a string")
             return self.manager.create_bhyve(
                 name,
                 owner_pid,
                 peer,
                 ssh_public_key,
+                profile=profile,
             )
         if action == "destroy":
             name = request.get("name")

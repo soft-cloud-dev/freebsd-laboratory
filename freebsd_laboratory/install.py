@@ -8,6 +8,7 @@ from jupyter_client.kernelspec import KernelSpecManager
 KERNELSPECS = (
     "freebsd-python",
     "freebsd-python-bhyve",
+    "linux-python-bhyve",
 )
 
 

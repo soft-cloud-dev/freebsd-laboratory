@@ -11,7 +11,8 @@ fail()
 
 RAW_IMAGE=${1:-/var/db/freebsd-laboratory/images/freebsd-python.raw}
 ZVOL_PARENT=${2:-zroot/vm/.zvol}
-ZVOL_NAME="${ZVOL_PARENT}/freebsd-python"
+IMAGE_BASE=$(basename "$RAW_IMAGE" .raw)
+ZVOL_NAME="${ZVOL_PARENT}/${IMAGE_BASE}"
 
 [ -f "$RAW_IMAGE" ] || fail "Golden raw image not found: $RAW_IMAGE"
 

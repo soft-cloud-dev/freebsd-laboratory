@@ -124,12 +124,14 @@ class RuntimeClient:
         name: str,
         owner_pid: int,
         ssh_public_key: str,
+        profile: str = "freebsd-python",
     ) -> dict[str, Any]:
         return self.request(
             "create-bhyve",
             name=name,
             owner_pid=owner_pid,
             ssh_public_key=ssh_public_key,
+            profile=profile,
         )
 
     def destroy(self, name: str) -> dict[str, Any]:

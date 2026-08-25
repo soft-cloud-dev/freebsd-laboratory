@@ -469,3 +469,75 @@ def test_destroy_cleans_up_md_unit_and_dataset(
     assert any("mdconfig -d -u 5" in cmd for cmd in flattened)
     assert any(f"zfs destroy -r -f zroot/vm/{name}" in cmd for cmd in flattened)
 
+
+def test_ping_reports_capabilities_and_profiles(tmp_path: Path) -> None:
+    handler = runtime_daemon.RuntimeRequestHandler.__new__(runtime_daemon.RuntimeRequestHandler)
+    handler.manager = make_manager(tmp_path)
+    peer = PeerCredentials(pid=10, uid=1000, gid=1000)
+
+    result = handler._dispatch({"action": "ping"}, peer)
+    assert result["service"] == "freebsd-laboratory-runtime"
+    assert result["version"] == 4
+    assert "bhyve.linux" in result["capabilities"]
+    assert "bhyve.freebsd" in result["capabilities"]
+    assert "linux-python" in result["bhyve_profiles"]
+    assert "freebsd-python" in result["bhyve_profiles"]
+
+
+def test_create_bhyve_linux_profile(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    manager = make_manager(tmp_path, vm_command="/usr/local/sbin/vm")
+    name = "freebsd-lab-linux01"
+    peer = PeerCredentials(pid=100, uid=1000, gid=1000)
+    key = ed25519_public_key()
+
+    commands_run: list[list[str]] = []
+
+    def fake_run(cmd: Sequence[str], *, check: bool = True, timeout: float | None = 60) -> subprocess.CompletedProcess[str]:
+        cmd_list = list(cmd)
+        commands_run.append(cmd_list)
+        if "info" in cmd_list:
+            return subprocess.CompletedProcess(cmd_list, 1, "", "")
+        return subprocess.CompletedProcess(cmd_list, 0, "", "")
+
+    monkeypatch.setattr(manager, "_run", fake_run)
+    monkeypatch.setattr(manager, "_require_vm_backend", lambda: None)
+    monkeypatch.setattr(manager, "_ensure_bridge", lambda: None)
+    monkeypatch.setattr(manager, "_ensure_vm_switch", lambda: None)
+    monkeypatch.setattr(manager, "_snapshot_exists", lambda s: True)
+    monkeypatch.setattr(manager, "_dataset_exists", lambda d: False)
+    monkeypatch.setattr(
+        runtime_daemon,
+        "query_process_identity",
+        lambda pid: ProcessIdentity(pid=pid, uid=1000, started_at="now", digest="a" * 64),
+    )
+
+    result = manager.create_bhyve(name, 100, peer, key, profile="linux-python")
+    assert result["name"] == name
+    assert result["profile"] == "linux-python"
+    assert result["guest_os"] == "linux"
+    assert result["interface"] == "eth0"
+
+    flattened = [" ".join(c) for c in commands_run]
+    assert any("vm create -t linux-lab" in cmd for cmd in flattened)
+    assert any("interface=eth0;" in cmd for cmd in flattened)
+    assert any("zfs clone zroot/vm/.zvol/linux-python@ready" in cmd for cmd in flattened)
+
+
+def test_create_bhyve_rejects_invalid_profile(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    manager = make_manager(tmp_path, vm_command="/usr/local/sbin/vm")
+    name = "freebsd-lab-invalid"
+    peer = PeerCredentials(pid=100, uid=1000, gid=1000)
+    key = ed25519_public_key()
+
+    monkeypatch.setattr(manager, "_require_vm_backend", lambda: None)
+    monkeypatch.setattr(
+        runtime_daemon,
+        "query_process_identity",
+        lambda pid: ProcessIdentity(pid=pid, uid=1000, started_at="now", digest="a" * 64),
+    )
+
+    with pytest.raises(ValueError, match="Unknown bhyve guest profile"):
+        manager.create_bhyve(name, 100, peer, key, profile="unsupported-os")
+
+    with pytest.raises(ValueError, match="Unknown bhyve guest profile"):
+        manager.create_bhyve(name, 100, peer, key, profile=True)  # type: ignore[arg-type]

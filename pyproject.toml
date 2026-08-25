@@ -41,6 +41,7 @@ freebsd-lab-sentry-diagnose = "freebsd_laboratory.sentry_diagnostics:main"
 [project.entry-points."jupyter_client.kernel_provisioners"]
 freebsd-jail-provisioner = "freebsd_laboratory.provisioner:FreeBSDJailProvisioner"
 freebsd-bhyve-provisioner = "freebsd_laboratory.bhyve:FreeBSDBhyveProvisioner"
+linux-bhyve-provisioner = "freebsd_laboratory.bhyve:LinuxBhyveProvisioner"
 
 [tool.setuptools.packages.find]
 include = ["freebsd_laboratory*"]
@@ -49,7 +50,11 @@ include = ["freebsd_laboratory*"]
 freebsd_laboratory = [
   "kernels/freebsd-python/kernel.json",
   "kernels/freebsd-python-bhyve/kernel.json",
-  "vm-bhyve/freebsd-lab.conf"
+  "kernels/linux-python-bhyve/kernel.json",
+  "vm-bhyve/freebsd-lab.conf",
+  "vm-bhyve/freebsd-lab-memdisk.conf",
+  "vm-bhyve/linux-lab.conf",
+  "vm-bhyve/linux-lab-memdisk.conf"
 ]
 
 [tool.pytest.ini_options]

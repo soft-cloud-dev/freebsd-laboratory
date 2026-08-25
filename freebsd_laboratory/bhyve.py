@@ -33,7 +33,53 @@ class FreeBSDBhyveProvisioner(RemoteRuntimeProvisioner):
         owner_pid: int,
         ssh_public_key: str,
     ) -> dict[str, Any]:
-        return self._client().create_bhyve(name, owner_pid, ssh_public_key)
+        return self._client().create_bhyve(
+            name,
+            owner_pid,
+            ssh_public_key,
+            profile="freebsd-python",
+        )
 
 
-__all__ = ["FreeBSDBhyveProvisioner"]
+class LinuxBhyveProvisioner(RemoteRuntimeProvisioner):
+    """Run ipykernel inside an ephemeral Linux bhyve VM on the private lab switch.
+
+    The root-owned runtime daemon performs vm-bhyve lifecycle operations. The
+    unprivileged Jupyter process reaches the guest only through SSH; all Jupyter
+    TCP channels remain loopback-only inside the VM.
+    """
+
+    runtime_label = "Linux bhyve VM"
+    provisioner_name_key = "vm_name"
+    startup_timeout: int = Int(90, min=5).tag(config=True)
+
+    @property
+    def vm_name(self) -> str | None:
+        return self._runtime_name
+
+    @vm_name.setter
+    def vm_name(self, value: str | None) -> None:
+        self._runtime_name = value
+
+    def _request_create(
+        self,
+        name: str,
+        owner_pid: int,
+        ssh_public_key: str,
+    ) -> dict[str, Any]:
+        client = self._client()
+        ping_info = client.ping()
+        capabilities = ping_info.get("capabilities", [])
+        if "bhyve.linux" not in capabilities:
+            raise RuntimeError(
+                "Runtime daemon does not support Linux bhyve guests (missing bhyve.linux capability)"
+            )
+        return client.create_bhyve(
+            name,
+            owner_pid,
+            ssh_public_key,
+            profile="linux-python",
+        )
+
+
+__all__ = ["FreeBSDBhyveProvisioner", "LinuxBhyveProvisioner"]

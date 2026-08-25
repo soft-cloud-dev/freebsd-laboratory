@@ -40,7 +40,14 @@ install -o root -g wheel -m 0644 "$TEMPLATE_SOURCE" "$VM_ROOT/.templates/freebsd
 if [ -f "$REPO_DIR/freebsd_laboratory/vm-bhyve/freebsd-lab-memdisk.conf" ]; then
     install -o root -g wheel -m 0644 "$REPO_DIR/freebsd_laboratory/vm-bhyve/freebsd-lab-memdisk.conf" "$VM_ROOT/.templates/freebsd-lab-memdisk.conf"
 fi
+if [ -f "$REPO_DIR/freebsd_laboratory/vm-bhyve/linux-lab.conf" ]; then
+    install -o root -g wheel -m 0644 "$REPO_DIR/freebsd_laboratory/vm-bhyve/linux-lab.conf" "$VM_ROOT/.templates/linux-lab.conf"
+fi
+if [ -f "$REPO_DIR/freebsd_laboratory/vm-bhyve/linux-lab-memdisk.conf" ]; then
+    install -o root -g wheel -m 0644 "$REPO_DIR/freebsd_laboratory/vm-bhyve/linux-lab-memdisk.conf" "$VM_ROOT/.templates/linux-lab-memdisk.conf"
+fi
 
 [ -r "$VM_ROOT/.templates/freebsd-lab.conf" ] || fail "installed template is not readable"
+[ -r "$VM_ROOT/.templates/linux-lab.conf" ] || fail "installed Linux template is not readable"
 printf 'Installed vm-bhyve templates in %s/.templates\n' "$VM_ROOT"
 
