@@ -52,14 +52,20 @@ fi
 
 # FreeBSD host compatibility: provide asm/types.h for tools/ and scripts/
 mkdir -p tools/include/asm
-if [ ! -f tools/include/asm/types.h ]; then
-    cat > tools/include/asm/types.h <<'EOF'
+cat > tools/include/asm/types.h <<'EOF'
 #ifndef _ASM_TYPES_H
 #define _ASM_TYPES_H
-#include <uapi/asm-generic/types.h>
+#include <stdint.h>
+typedef int8_t __s8;
+typedef uint8_t __u8;
+typedef int16_t __s16;
+typedef uint16_t __u16;
+typedef int32_t __s32;
+typedef uint32_t __u32;
+typedef int64_t __s64;
+typedef uint64_t __u64;
 #endif
 EOF
-fi
 
 # FreeBSD host compatibility: fix BSD install flag ordering in tools Makefiles
 find tools -name Makefile -exec sed -i '' -e 's/\$(INSTALL) \$1 \$(if \$3,-m \$3,)/\$(INSTALL) \$(if \$3,-m \$3,) \$1/g' {} + 2>/dev/null || true
