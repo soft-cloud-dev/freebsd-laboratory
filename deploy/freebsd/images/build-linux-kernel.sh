@@ -104,14 +104,12 @@ EOF
 
 # FreeBSD host compatibility: provide dummy objtool to bypass host tool compilation
 mkdir -p tools/objtool
-cat > tools/objtool/objtool <<'EOF'
-#!/bin/sh
-exit 0
+cat > tools/objtool/Makefile <<'EOF'
+all:
+	@printf '#!/bin/sh\nexit 0\n' > $(CURDIR)/objtool
+	@chmod +x $(CURDIR)/objtool
+clean:
 EOF
-chmod 0755 tools/objtool/objtool
-
-# FreeBSD host compatibility: fix BSD install flag ordering in tools Makefiles
-find tools -name Makefile -exec sed -i '' -e 's/\$(INSTALL) \$1 \$(if \$3,-m \$3,)/\$(INSTALL) \$(if \$3,-m \$3,) \$1/g' {} + 2>/dev/null || true
 
 cp "$KERNEL_CONFIG" .config
 
