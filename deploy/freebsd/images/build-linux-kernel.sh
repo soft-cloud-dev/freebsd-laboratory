@@ -50,7 +50,7 @@ if [ -f arch/x86/tools/relocs.h ] && ! grep -q 'R_X86_64_JUMP_SLOT' arch/x86/too
     printf '\n#ifndef R_X86_64_JUMP_SLOT\n#define R_X86_64_JUMP_SLOT 7\n#endif\n' >> arch/x86/tools/relocs.h
 fi
 
-# FreeBSD host compatibility: provide asm/types.h for tools/ and scripts/
+# FreeBSD host compatibility: provide asm/ headers for tools/ and scripts/
 mkdir -p tools/include/asm
 cat > tools/include/asm/types.h <<'EOF'
 #ifndef _ASM_TYPES_H
@@ -64,6 +64,41 @@ typedef int32_t __s32;
 typedef uint32_t __u32;
 typedef int64_t __s64;
 typedef uint64_t __u64;
+#endif
+EOF
+
+cat > tools/include/asm/posix_types.h <<'EOF'
+#ifndef _ASM_POSIX_TYPES_H
+#define _ASM_POSIX_TYPES_H
+#include <sys/types.h>
+typedef unsigned long __kernel_ulong_t;
+typedef long __kernel_long_t;
+typedef unsigned int __kernel_mode_t;
+typedef int __kernel_pid_t;
+typedef int __kernel_ipc_pid_t;
+typedef unsigned int __kernel_uid_t;
+typedef unsigned int __kernel_gid_t;
+typedef __kernel_ulong_t __kernel_size_t;
+typedef __kernel_long_t __kernel_ssize_t;
+typedef __kernel_long_t __kernel_ptrdiff_t;
+typedef __kernel_long_t __kernel_time_t;
+typedef __kernel_long_t __kernel_clock_t;
+typedef int __kernel_timer_t;
+typedef int __kernel_clockid_t;
+typedef char * __kernel_caddr_t;
+typedef unsigned short __kernel_uid16_t;
+typedef unsigned short __kernel_gid16_t;
+typedef long long __kernel_loff_t;
+typedef __kernel_long_t __kernel_old_time_t;
+typedef long __kernel_time64_t;
+typedef struct { int val[2]; } __kernel_fsid_t;
+#endif
+EOF
+
+cat > tools/include/asm/bitsperlong.h <<'EOF'
+#ifndef _ASM_BITSPERLONG_H
+#define _ASM_BITSPERLONG_H
+#define __BITS_PER_LONG 64
 #endif
 EOF
 
