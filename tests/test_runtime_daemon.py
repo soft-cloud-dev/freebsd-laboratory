@@ -438,18 +438,25 @@ def test_destroy_cleans_up_md_unit_and_dataset(
     }
     manager._write_registry(record)
 
-    commands_run: list[list[str]] = []
+    existing_datasets = {f"zroot/vm/{name}"}
 
     def fake_run(cmd: Sequence[str], *, check: bool = True, timeout: float | None = 60) -> subprocess.CompletedProcess[str]:
         cmd_list = list(cmd)
         commands_run.append(cmd_list)
+        if "zfs" in cmd_list and "destroy" in cmd_list:
+            for d in list(existing_datasets):
+                if d in cmd_list:
+                    existing_datasets.discard(d)
         return subprocess.CompletedProcess(cmd_list, 0, "", "")
 
     monkeypatch.setattr(manager, "_run", fake_run)
     monkeypatch.setattr(manager, "_vm_available", lambda: True)
     monkeypatch.setattr(manager, "_vm_exists", lambda n: False)
-    monkeypatch.setattr(manager, "_dataset_exists", lambda d: True)
+    monkeypatch.setattr(manager, "_jail_exists", lambda n: False)
+    monkeypatch.setattr(manager, "_interface_exists", lambda i: False)
+    monkeypatch.setattr(manager, "_dataset_exists", lambda d: d in existing_datasets)
     monkeypatch.setattr(manager, "_md_exists", lambda u: False)
+
 
     result = manager.destroy(name, requester_uid=1000)
     assert result["name"] == name
