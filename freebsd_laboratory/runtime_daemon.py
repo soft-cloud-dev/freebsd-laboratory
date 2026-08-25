@@ -16,6 +16,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 from dataclasses import dataclass
 from functools import wraps
 from pathlib import Path
@@ -802,50 +803,67 @@ class RuntimeManager:
             self._authorize_record(record, requester_uid)
         runtime_type = record.get("type")
         removed: list[str] = []
-
         if runtime_type == "bhyve":
             self._require_vm_backend()
         if runtime_type == "bhyve" or self._vm_exists(name):
             self._run([self.config.vm_command, "poweroff", "-f", name], check=False, timeout=20)
-            result = self._run(
-                [self.config.vm_command, "destroy", "-f", name], check=False, timeout=60
-            )
-            if result.returncode == 0:
-                removed.append("bhyve")
+            for _ in range(5):
+                result = self._run(
+                    [self.config.vm_command, "destroy", "-f", name], check=False, timeout=60
+                )
+                if result.returncode == 0:
+                    removed.append("bhyve")
+                    break
+                time.sleep(0.2)
 
         md_unit = record.get("md_unit")
         if isinstance(md_unit, str) and re.fullmatch(r"md\d+", md_unit):
             unit_num = md_unit[2:]
-            result = self._run(["mdconfig", "-d", "-u", unit_num], check=False)
-            if result.returncode == 0:
-                removed.append(md_unit)
+            for _ in range(5):
+                result = self._run(["mdconfig", "-d", "-u", unit_num], check=False)
+                if result.returncode == 0:
+                    removed.append(md_unit)
+                    break
+                time.sleep(0.2)
 
         vm_dataset = record.get("dataset")
         if isinstance(vm_dataset, str) and self._dataset_exists(vm_dataset):
-            result = self._run(
-                ["zfs", "destroy", "-r", "-f", vm_dataset], check=False, timeout=60
-            )
-            if result.returncode == 0:
-                removed.append(vm_dataset)
+            for _ in range(10):
+                result = self._run(
+                    ["zfs", "destroy", "-r", "-f", vm_dataset], check=False, timeout=60
+                )
+                if result.returncode == 0:
+                    removed.append(vm_dataset)
+                    break
+                time.sleep(0.2)
 
         if runtime_type == "jail" or self._jail_exists(name):
-            result = self._run(["jail", "-r", name], check=False, timeout=30)
-            if result.returncode == 0:
-                removed.append("jail")
+            for _ in range(5):
+                result = self._run(["jail", "-r", name], check=False, timeout=30)
+                if result.returncode == 0:
+                    removed.append("jail")
+                    break
+                time.sleep(0.2)
 
         epair_host = record.get("epair_host")
         if isinstance(epair_host, str) and re.fullmatch(r"epair\d+a", epair_host):
-            result = self._run(["ifconfig", epair_host, "destroy"], check=False)
-            if result.returncode == 0:
-                removed.append(epair_host)
+            for _ in range(5):
+                result = self._run(["ifconfig", epair_host, "destroy"], check=False)
+                if result.returncode == 0:
+                    removed.append(epair_host)
+                    break
+                time.sleep(0.2)
 
         dataset = self._jail_dataset(name)
         if self._dataset_exists(dataset):
-            result = self._run(
-                ["zfs", "destroy", "-r", "-f", dataset], check=False, timeout=60
-            )
-            if result.returncode == 0:
-                removed.append(dataset)
+            for _ in range(10):
+                result = self._run(
+                    ["zfs", "destroy", "-r", "-f", dataset], check=False, timeout=60
+                )
+                if result.returncode == 0:
+                    removed.append(dataset)
+                    break
+                time.sleep(0.2)
 
         remaining: list[str] = []
         if self._vm_exists(name):
