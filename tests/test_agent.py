@@ -489,7 +489,6 @@ class TestControllerIntegration(unittest.TestCase):
 class TestAgentModelSystemRoleFallback(unittest.TestCase):
     def test_system_role_rejection_merges_into_first_user_turn(self) -> None:
         model = object.__new__(AgentModel)
-        model.backend = "llama_cpp"
         model.llm = MagicMock()
         model.n_ctx = 2048
         model._token_count = lambda text: len(text.split())
@@ -513,37 +512,6 @@ class TestAgentModelSystemRoleFallback(unittest.TestCase):
         self.assertEqual(len(second_call_messages), 1)
         self.assertEqual(second_call_messages[0]["role"], "user")
         self.assertIn("GOAL: Inspect CPU model", second_call_messages[0]["content"])
-
-
-    def test_vllm_server_backend_query(self) -> None:
-        model = object.__new__(AgentModel)
-        model.backend = "vllm_server"
-        model.model_path = "qwen2.5:1.5b"
-        model.vllm_url = "http://localhost:8000/v1"
-        model.n_ctx = 2048
-        model._token_count = lambda text: len(text.split())
-        model.api_key = ""
-
-        with unittest.mock.patch("urllib.request.urlopen") as mock_urlopen:
-            mock_resp = MagicMock()
-            mock_resp.read.return_value = json.dumps({
-                "choices": [{"message": {"content": "COMMAND: ifconfig"}}]
-            }).encode("utf-8")
-            mock_resp.__enter__.return_value = mock_resp
-            mock_urlopen.return_value = mock_resp
-
-            action = model.next_action("Check network", [])
-            self.assertIsInstance(action, Command)
-            self.assertEqual(action.command, "ifconfig")
-
-
-class TestAgentCLIParsing(unittest.TestCase):
-    def test_cli_parse_vllm_options(self) -> None:
-        from freebsd_laboratory.agent.cli import parse_args
-        args = parse_args(["--backend", "vllm_server", "--vllm-url", "http://127.0.0.1:8000/v1", "Check disk"])
-        self.assertEqual(args.backend, "vllm_server")
-        self.assertEqual(args.vllm_url, "http://127.0.0.1:8000/v1")
-        self.assertEqual(args.goal, "Check disk")
 
 
 if __name__ == "__main__":
