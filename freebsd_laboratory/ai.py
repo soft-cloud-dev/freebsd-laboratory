@@ -113,7 +113,11 @@ class TokenUsageTracker:
             pass
 
     def record(
-        self, prompt_tokens: int, completion_tokens: int, elapsed_seconds: float = 0.0
+        self,
+        prompt_tokens: int,
+        completion_tokens: int,
+        elapsed_seconds: float = 0.0,
+        sync_server: bool = False,
     ) -> None:
         if (
             isinstance(prompt_tokens, bool)
@@ -133,7 +137,8 @@ class TokenUsageTracker:
         self.total_elapsed_seconds += e
 
         self._sync_to_file(p, c, e)
-        self._sync_to_server(p, c, e)
+        if sync_server:
+            self._sync_to_server(p, c, e)
 
     def summary_dict(self) -> dict[str, Any]:
         file_data = self._read_file()
@@ -160,7 +165,7 @@ class TokenUsageTracker:
             "tokens_per_second": round(tps, 1),
         }
 
-    def reset(self) -> None:
+    def reset(self, sync_server: bool = False) -> None:
         self.prompt_tokens = 0
         self.completion_tokens = 0
         self.total_tokens = 0
@@ -173,14 +178,15 @@ class TokenUsageTracker:
                 self.usage_file.unlink()
         except Exception:
             pass
-        try:
-            _query_server(
-                "/ai/usage",
-                {"action": "reset"},
-                timeout=1.0,
-            )
-        except Exception:
-            pass
+        if sync_server:
+            try:
+                _query_server(
+                    "/ai/usage",
+                    {"action": "reset"},
+                    timeout=1.0,
+                )
+            except Exception:
+                pass
 
 
 # Session-lifetime singleton that resets whenever the kernel restarts
@@ -290,6 +296,7 @@ def generate(
     temperature: float = 0.0,
     system_prompt: str | None = None,
     n_ctx: int = 2048,
+    fallback_to_server: bool = True,
 ) -> str:
     """Generate raw text completion from the local LLM, tracking cumulative token usage."""
     t0 = time.perf_counter()
@@ -327,7 +334,9 @@ def generate(
         _SESSION_TRACKER.record(prompt_tokens, completion_tokens, elapsed)
 
         return content
-    except Exception:
+    except Exception as exc:
+        if not fallback_to_server:
+            raise
         # Fallback to host Jupyter Server endpoint
         data = _query_server(
             "/ai/generate",
@@ -384,6 +393,7 @@ def run_agent(
     max_runtime: int = 300,
     socket_path: str = DEFAULT_RUNTIME_SOCKET,
     evidence_dir: str | None = None,
+    fallback_to_server: bool = True,
 ) -> str:
     """Run an autonomous troubleshooting agent in an isolated jail or bhyve VM."""
     t0 = time.perf_counter()
@@ -426,7 +436,9 @@ def run_agent(
         finally:
             if evidence_log is not None:
                 evidence_log.close()
-    except Exception:
+    except Exception as exc:
+        if not fallback_to_server:
+            raise
         # Fallback to host server endpoint
         data = _query_server(
             "/ai/agent",
@@ -444,7 +456,10 @@ def run_agent(
         return res
 
 
-def list_models(models_dir: str | Path = "/home/freebsd/models") -> list[dict[str, Any]]:
+def list_models(
+    models_dir: str | Path = "/home/freebsd/models",
+    fallback_to_server: bool = True,
+) -> list[dict[str, Any]]:
     """List all available local GGUF models with sizes."""
     p = Path(models_dir)
     if p.is_dir() and not p.is_symlink():
@@ -461,7 +476,7 @@ def list_models(models_dir: str | Path = "/home/freebsd/models") -> list[dict[st
         return models
 
     # Fallback to host server API only when default models directory requested
-    if str(models_dir) == "/home/freebsd/models":
+    if fallback_to_server and str(models_dir) == "/home/freebsd/models":
         try:
             data = _query_server("/ai/models")
             return data.get("models", [])

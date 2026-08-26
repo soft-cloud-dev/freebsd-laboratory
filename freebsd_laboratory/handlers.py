@@ -83,7 +83,7 @@ class ExportHandler(LaboratoryHandler):
 class AIModelsHandler(LaboratoryHandler):
     def get(self) -> None:
         from . import ai
-        self.finish_json({"models": ai.list_models()})
+        self.finish_json({"models": ai.list_models(fallback_to_server=False)})
 
 
 class AIGenerateHandler(LaboratoryHandler):
@@ -100,14 +100,18 @@ class AIGenerateHandler(LaboratoryHandler):
         temperature = float(document.get("temperature", 0.0))
         system_prompt = document.get("system_prompt")
 
-        result = ai.generate(
-            prompt=prompt,
-            model_path=model,
-            max_tokens=max_tokens,
-            temperature=temperature,
-            system_prompt=system_prompt,
-        )
-        self.finish_json({"ok": True, "result": result})
+        try:
+            result = ai.generate(
+                prompt=prompt,
+                model_path=model,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                system_prompt=system_prompt,
+                fallback_to_server=False,
+            )
+            self.finish_json({"ok": True, "result": result})
+        except Exception as error:
+            raise web.HTTPError(500, str(error)) from error
 
 
 class AIAgentHandler(LaboratoryHandler):
@@ -124,14 +128,18 @@ class AIAgentHandler(LaboratoryHandler):
         max_steps = int(document.get("max_steps", 16))
         max_runtime = int(document.get("max_runtime", 300))
 
-        result = ai.run_agent(
-            goal=goal,
-            mode=mode,
-            model_path=model,
-            max_steps=max_steps,
-            max_runtime=max_runtime,
-        )
-        self.finish_json({"ok": True, "result": result})
+        try:
+            result = ai.run_agent(
+                goal=goal,
+                mode=mode,
+                model_path=model,
+                max_steps=max_steps,
+                max_runtime=max_runtime,
+                fallback_to_server=False,
+            )
+            self.finish_json({"ok": True, "result": result})
+        except Exception as error:
+            raise web.HTTPError(500, str(error)) from error
 
 
 class AIUsageHandler(LaboratoryHandler):
@@ -147,7 +155,12 @@ class AIUsageHandler(LaboratoryHandler):
             prompt_tokens = document.get("prompt_tokens", 0)
             completion_tokens = document.get("completion_tokens", 0)
             elapsed_seconds = document.get("elapsed_seconds", 0.0)
-            ai._SESSION_TRACKER.record(prompt_tokens, completion_tokens, elapsed_seconds)
+            ai._SESSION_TRACKER.record(
+                prompt_tokens,
+                completion_tokens,
+                elapsed_seconds,
+                sync_server=False,
+            )
         else:
-            ai.reset_token_usage()
+            ai._SESSION_TRACKER.reset(sync_server=False)
         self.finish_json({"ok": True, "usage": ai.token_usage()})
