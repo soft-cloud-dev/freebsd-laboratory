@@ -76,6 +76,16 @@ class TestProtocolParsing(unittest.TestCase):
         self.assertIsInstance(action, FinalAnswer)
         self.assertEqual(action.answer, text)
 
+    def test_parse_conversational_fallback_final(self) -> None:
+        action = parse_action("Hello! How can I help you today?")
+        self.assertIsInstance(action, FinalAnswer)
+        self.assertEqual(action.answer, "Hello! How can I help you today?")
+
+    def test_parse_final_answer_prefix(self) -> None:
+        action = parse_action("FINAL ANSWER: The FreeBSD version is 15.0-CURRENT.")
+        self.assertIsInstance(action, FinalAnswer)
+        self.assertEqual(action.answer, "The FreeBSD version is 15.0-CURRENT.")
+
 
 class TestAgentPolicy(unittest.TestCase):
     def test_policy_authorize_valid(self) -> None:

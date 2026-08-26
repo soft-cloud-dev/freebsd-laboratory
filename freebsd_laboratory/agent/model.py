@@ -10,17 +10,19 @@ if TYPE_CHECKING:
     from llama_cpp import Llama
 
 SYSTEM_PROMPT = """\
-You control one disposable FreeBSD runtime.
-Return exactly one action per turn.
+You are an autonomous FreeBSD system administrator agent.
+You operate on a disposable FreeBSD runtime to accomplish the user's goal.
 
-COMMAND: <single shell action>
-or:
-FINAL: <task result>
+You MUST respond in ONE of two formats:
+COMMAND: <single shell command to execute>
+FINAL: <answer or summary of the completed task>
 
-Rules:
-- One action per turn. No background processes.
-- Do not use interactive commands (vi, less, top, etc).
-- When the task is complete, use FINAL: with your result.
+Guidelines:
+- Output ONLY a single COMMAND: or FINAL: action per turn.
+- For conversational greetings or pure questions (e.g. "Hi", "What is 2+2?"), respond immediately with FINAL: <response>.
+- To inspect or modify the system, run one non-interactive command with COMMAND: <cmd>.
+- Do not use interactive tools (vi, less, top).
+- Once you see the command output and have the answer to the user's goal, summarize the result with FINAL: <answer>.
 """
 
 MODEL_CONTEXT_STDOUT_LIMIT = 1024
@@ -60,11 +62,23 @@ def parse_action(text: str) -> Action:
         elif line_clean.upper().startswith("FINAL:"):
             ans = line_clean[len("FINAL:") :].strip()
             return FinalAnswer(ans or stripped)
+        elif line_clean.upper().startswith("FINAL ANSWER:"):
+            ans = line_clean[len("FINAL ANSWER:") :].strip()
+            return FinalAnswer(ans or stripped)
 
     # If first line looks like a single command without prompt decoration
     first_line = stripped.splitlines()[0].strip()
-    if len(stripped.splitlines()) == 1 and not first_line.startswith(("#", "//", "I ", "Let ")):
-        return Command(first_line)
+    if len(stripped.splitlines()) == 1:
+        # Check if the single line is conversational prose or sentence
+        is_prose = (
+            any(first_line.endswith(p) for p in (".", "?", "!"))
+            or first_line.startswith((
+                "#", "//", "I ", "Let ", "Hello", "Hi", "Sure", "There ", "Here ",
+                "The ", "This ", "You ", "We ", "Please ", "What ", "How ", "Why ", "Is ", "Can "
+            ))
+        )
+        if not is_prose and len(first_line.split()) <= 8:
+            return Command(first_line)
 
     return FinalAnswer(stripped)
 
@@ -131,7 +145,12 @@ class AgentModel:
             assistant_msg = {"role": "assistant", "content": f"COMMAND: {obs.command}"}
             user_msg = {
                 "role": "user",
-                "content": f"EXIT: {obs.exit_status}\nSTDOUT:\n{stdout_text}\nSTDERR:\n{stderr_text}",
+                "content": (
+                    f"EXIT: {obs.exit_status}\n"
+                    f"STDOUT:\n{stdout_text}\n"
+                    f"STDERR:\n{stderr_text}\n\n"
+                    "Provide the next COMMAND: <cmd> or FINAL: <result>."
+                ),
             }
             pair_cost = self._token_count(assistant_msg["content"]) + self._token_count(
                 user_msg["content"]
