@@ -122,6 +122,40 @@ KERNEL_WALKAROUNDS: Dict[str, KernelWalkaroundSpec] = {
         startup_timeout_seconds=90,
         extra_constraints="Requires runtime daemon capability: bhyve.linux",
     ),
+    "freebsd-python-host": KernelWalkaroundSpec(
+        title="FreeBSD Host Walkaround",
+        provisioner_file="freebsd_laboratory/ai.py",
+        identity_cmd=(
+            "%%sh\n"
+            "printf 'OS: '; uname -srm\n"
+            "printf 'User: '; whoami\n"
+            "printf 'Jailed: '; sysctl -n security.jail.jailed\n"
+            "printf 'VM Guest: '; sysctl -n kern.vm_guest\n"
+            "printf 'Hostname: '; hostname\n"
+        ),
+        security_boundary=(
+            "No additional FreeBSD Laboratory runtime-isolation boundary. Code executes as the "
+            "Jupyter server OS user on the host and is therefore constrained only by normal host "
+            "credentials, filesystem permissions, daemon authorization, and other host policy."
+        ),
+        boundary_diagram=(
+            "graph TD\n"
+            "    Browser[JupyterLab Browser] -->|NotebookActions / REST| Server[Jupyter Server (User: freebsd)]\n"
+            "    Server --> Kernel[Host ipykernel (.venv)]\n"
+            "    Kernel --> AI[llama-cpp-python / GGUF Models]\n"
+            "    Kernel -.->|Autonomous Tasks| Daemon[Root Runtime Daemon (via runtime.sock)]\n"
+            "    Daemon -.->|Provisions| Guests[Disposable Jails / bhyve VMs]"
+        ),
+        ai_prompt=(
+            "%ai Explain the architectural distinction between in-process host execution and disposable guest runtimes."
+        ),
+        agent_prompt=(
+            "%%agent --mode bhyve --steps 8\n"
+            "Launch a bhyve VM from the host control plane and verify its isolated network interfaces."
+        ),
+        startup_timeout_seconds=0,
+        extra_constraints="Host execution; in-process access to local GGUF models and AVX2 SIMD acceleration",
+    ),
 }
 
 
@@ -162,7 +196,13 @@ def make_walkaround(
     provisioner_file = repo_root / spec.provisioner_file
     prov_excerpt = get_snippet(
         provisioner_file,
-        ["def _request_create", "class FreeBSDJailProvisioner", "class LinuxBhyveProvisioner", "class "],
+        [
+            "def _request_create",
+            "class FreeBSDJailProvisioner",
+            "class LinuxBhyveProvisioner",
+            "def get_cached_llama",
+            "class ",
+        ],
         16,
     )
     kernel_json_excerpt = get_kernel_json_excerpt(kernel_json_path)
@@ -177,6 +217,12 @@ def make_walkaround(
         "- **Networking:** Loopback ZMQ forwarded over SSH; no direct guest port exposure\n"
         "- **Control Plane:** Privileged operations delegated to root `runtime.sock`\n"
     )
+    if is_host_kernel:
+        constraints_text = (
+            "- **Execution Plane:** Host environment (unprivileged Jupyter server user)\n"
+            "- **AI Inference:** Native in-process LLM inference with AVX2 SIMD acceleration\n"
+            "- **Control Plane:** Connects to root `runtime.sock` via `RuntimeClient` for orchestration\n"
+        )
     if spec.extra_constraints:
         constraints_text += f"- **Capability Requirement:** `{spec.extra_constraints}`\n"
 
@@ -210,7 +256,7 @@ def make_walkaround(
             "metadata": {},
             "source": [
                 "## 1. Architecture: The Three Planes\n",
-                "The notebook document is hosted by JupyterLab on the host, while code cells execute in the guest runtime. Provisioning occurs on the host, outside this execution environment.\n\n",
+                "The notebook document is hosted by JupyterLab on the host, while code cells execute in the selected runtime. Provisioning occurs on the host, outside guest execution environments.\n\n",
                 "```mermaid\n",
                 "graph LR\n",
                 "    Browser[JupyterLab / Notebook document]\n",
@@ -293,7 +339,7 @@ def make_walkaround(
                 "metadata": {},
                 "source": [
                     "## 6. Interpret the Evidence\n",
-                    "Query the in-notebook AI assistant to synthesize findings.\n",
+                    "Query the local in-process AI assistant directly using the `%ai` magic on the host:\n",
                 ],
             },
             {
@@ -301,14 +347,17 @@ def make_walkaround(
                 "execution_count": None,
                 "metadata": {},
                 "outputs": [],
-                "source": [spec.ai_prompt],
+                "source": [
+                    "%load_ext freebsd_laboratory.magics\n"
+                    + spec.ai_prompt
+                ],
             },
             {
                 "cell_type": "markdown",
                 "metadata": {},
                 "source": [
                     "## 7. Bounded Investigation\n",
-                    "Delegate a bounded, read-only verification task to the autonomous agent.\n",
+                    "Dispatch a bounded autonomous agent task from the host control plane to a fresh disposable guest runtime:\n",
                 ],
             },
             {
@@ -351,10 +400,9 @@ def make_walkaround(
             "metadata": {},
             "source": [
                 "## 8. What You Cannot See\n",
-                "Explicitly distinguishing guest-observable facts from control-plane facts:\n\n",
-                "- **Guest-Observable Facts:** `uname`, network interfaces (e.g. `epair`, `tap`, `vnet`), IP addresses, installed packages, guest OS identity.\n",
-                "- **Control-Plane Facts:** Host PF firewall rules, Jupyter server token validation, bhyve/jail creation commands executed by the daemon, host-side lease allocation, loopback port translation, provisioner decisions.\n\n",
-                "A notebook executing inside this runtime cannot directly prove that the host used `create_bhyve()` or `jail -c`. Those are control-plane facts supported by the implementation excerpts in Section 3.\n",
+                "Explicitly distinguishing runtime-observable facts from control-plane facts:\n\n",
+                "- **Runtime-Observable Facts:** `uname`, active user identity, host network interfaces, process table, filesystem structure.\n",
+                "- **Control-Plane Facts:** Even on the host, Jupyter and this kernel execute as unprivileged user `freebsd`. Root-owned lifecycle operations (`zfs clone`, `jail -c`, `vm create`) still require delegating requests through `/var/run/freebsd-laboratory/runtime.sock`.\n",
             ],
         },
         {
@@ -363,8 +411,8 @@ def make_walkaround(
             "source": [
                 "## 9. Summary & Design Invariants\n",
                 "Core architectural invariants:\n\n",
-                "1. **Document vs Runtime:** The notebook document is managed by JupyterLab on the host; code cells execute in the isolated runtime.\n",
-                "2. **Transport Security:** Jupyter TCP channels are tunneled exclusively over loopback SSH port forwards.\n",
+                "1. **Document vs Runtime:** The notebook document is managed by JupyterLab on the host; code cells execute in the selected runtime.\n",
+                "2. **Transport Security:** Remote guest channels are tunneled exclusively over loopback SSH port forwards; the host kernel connects directly in-process.\n",
                 "3. **Privilege Separation:** The unprivileged Jupyter Server delegates privileged lifecycle operations to the root runtime daemon via `/var/run/freebsd-laboratory/runtime.sock`.\n",
                 "4. **Network Policy:** Guest environments cannot observe or alter host-side packet filtering (PF) policies.\n",
                 "5. **Ownership Scoping:** Destructive lifecycle operations (GC/cleanup) are strictly scoped to the authenticated owner's UID.\n",
