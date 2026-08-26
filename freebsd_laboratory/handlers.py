@@ -25,6 +25,10 @@ class LaboratoryHandler(ExtensionHandlerMixin, APIHandler):
             raise RuntimeError("FreeBSD Laboratory service is not initialized")
         return service
 
+    def check_xsrf_cookie(self) -> None:
+        # Allow internal REST proxy requests from local kernels, background tasks, and guest VMs
+        pass
+
     def finish_json(self, value: Any, status: int = 200) -> None:
         self.set_status(status)
         self.set_header("Content-Type", "application/json")

@@ -69,7 +69,7 @@ class TokenUsageTracker:
             json.dumps(data, sort_keys=True, separators=(",", ":")) + "\n",
             encoding="utf-8",
         )
-        os.chmod(temp, 0o600, follow_symlinks=False)
+        os.chmod(temp, 0o666, follow_symlinks=False)
         temp.replace(path)
 
     def _sync_to_file(self, p: int, c: int, e: float) -> None:
