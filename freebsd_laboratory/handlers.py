@@ -74,3 +74,57 @@ class ExportHandler(LaboratoryHandler):
     @web.authenticated
     def post(self) -> None:
         self.finish_json(self.service.export())
+
+
+class AIModelsHandler(LaboratoryHandler):
+    def get(self) -> None:
+        from . import ai
+        self.finish_json({"models": ai.list_models()})
+
+
+class AIGenerateHandler(LaboratoryHandler):
+    def post(self) -> None:
+        from . import ai
+
+        document = self.get_json_body() or {}
+        prompt = document.get("prompt", "")
+        if not prompt:
+            raise web.HTTPError(400, "Prompt is required")
+
+        model = document.get("model")
+        max_tokens = int(document.get("max_tokens", 512))
+        temperature = float(document.get("temperature", 0.0))
+        system_prompt = document.get("system_prompt")
+
+        result = ai.generate(
+            prompt=prompt,
+            model_path=model,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            system_prompt=system_prompt,
+        )
+        self.finish_json({"ok": True, "result": result})
+
+
+class AIAgentHandler(LaboratoryHandler):
+    def post(self) -> None:
+        from . import ai
+
+        document = self.get_json_body() or {}
+        goal = document.get("goal", "")
+        if not goal:
+            raise web.HTTPError(400, "Goal is required")
+
+        mode = document.get("mode", "bhyve")
+        model = document.get("model")
+        max_steps = int(document.get("max_steps", 16))
+        max_runtime = int(document.get("max_runtime", 300))
+
+        result = ai.run_agent(
+            goal=goal,
+            mode=mode,
+            model_path=model,
+            max_steps=max_steps,
+            max_runtime=max_runtime,
+        )
+        self.finish_json({"ok": True, "result": result})
