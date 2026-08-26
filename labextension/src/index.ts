@@ -81,6 +81,21 @@ async function requestJson<T>(
   return (await response.json()) as T;
 }
 
+interface AIUsageState {
+  total_tokens: number;
+  prompt_tokens: number;
+  completion_tokens: number;
+  requests: number;
+  tokens_per_second: number;
+}
+
+async function fetchAIUsage(): Promise<AIUsageState> {
+  const response = await requestJson<{ ok: boolean; usage: AIUsageState }>('ai/usage', {
+    method: 'GET'
+  });
+  return response.usage;
+}
+
 async function postEvent(
   kind: string,
   payload: Record<string, unknown>
@@ -269,6 +284,40 @@ class LaboratoryStatusBar extends Widget {
     );
 
     this.node.append(left, center, right);
+  }
+}
+
+class AITokenUsageBadge extends Widget {
+  private _countSpan: HTMLElement;
+
+  constructor() {
+    super();
+    this.addClass('freebsdLab-TokenBadge');
+    const icon = element('span', 'freebsdLab-TokenBadge-icon', '⚡');
+    const text = element('span', 'freebsdLab-TokenBadge-text');
+    text.appendChild(document.createTextNode('Tokens: '));
+    this._countSpan = element('strong', 'freebsdLab-TokenBadge-count', '0');
+    text.appendChild(this._countSpan);
+    this.node.appendChild(icon);
+    this.node.appendChild(text);
+    this.node.title = 'Session AI Token Usage: 0 tokens (Resets on kernel restart)';
+  }
+
+  setUsage(usage: AIUsageState): void {
+    const total = usage.total_tokens ?? 0;
+    const formatted = total.toLocaleString();
+    this._countSpan.textContent = formatted;
+    if (total > 0) {
+      this.addClass('freebsdLab-TokenBadge--active');
+      const prompt = (usage.prompt_tokens ?? 0).toLocaleString();
+      const comp = (usage.completion_tokens ?? 0).toLocaleString();
+      const reqs = usage.requests ?? 0;
+      const tps = (usage.tokens_per_second ?? 0).toFixed(1);
+      this.node.title = `Session AI Tokens: ${formatted} total (${prompt} prompt + ${comp} generated across ${reqs} request(s), ${tps} tok/s) • Resets on kernel restart`;
+    } else {
+      this.removeClass('freebsdLab-TokenBadge--active');
+      this.node.title = 'Session AI Token Usage: 0 tokens (Resets on kernel restart)';
+    }
   }
 }
 
@@ -520,6 +569,17 @@ const plugin: JupyterFrontEndPlugin<void> = {
       category: 'FreeBSD Laboratory'
     });
 
+    const activeTokenBadges = new Set<AITokenUsageBadge>();
+    const updateAllTokenBadges = (): void => {
+      void fetchAIUsage()
+        .then(usage => {
+          activeTokenBadges.forEach(badge => badge.setUsage(usage));
+        })
+        .catch(() => {
+          // Ignored if AI endpoint unavailable
+        });
+    };
+
     const attachNotebook = async (panel: NotebookPanel): Promise<void> => {
       if (attachedNotebooks.has(panel)) {
         return;
@@ -558,6 +618,20 @@ const plugin: JupyterFrontEndPlugin<void> = {
       exportButton.addClass('freebsdLab-ExportButton');
       panel.toolbar.insertItem(10, 'freebsd-laboratory-export', exportButton);
 
+      const tokenBadge = new AITokenUsageBadge();
+      activeTokenBadges.add(tokenBadge);
+      panel.disposed.connect(() => {
+        activeTokenBadges.delete(tokenBadge);
+      });
+      panel.toolbar.insertItem(11, 'freebsd-laboratory-ai-tokens', tokenBadge);
+
+      panel.sessionContext.statusChanged.connect((_sender, status) => {
+        if (status === 'restarting' || status === 'idle' || status === 'dead') {
+          updateAllTokenBadges();
+        }
+      });
+      updateAllTokenBadges();
+
       try {
         const state = await postEvent('notebook-context', notebookContext(panel));
         progression.setState(state);
@@ -594,6 +668,8 @@ const plugin: JupyterFrontEndPlugin<void> = {
       if (!panel) {
         return;
       }
+
+      updateAllTokenBadges();
 
       const cellDocument = args.cell.model.toJSON() as CellDocument;
       void postEvent('cell-executed', {

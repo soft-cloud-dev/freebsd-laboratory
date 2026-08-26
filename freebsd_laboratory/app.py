@@ -10,6 +10,7 @@ from .handlers import (
     AIAgentHandler,
     AIGenerateHandler,
     AIModelsHandler,
+    AIUsageHandler,
     EventHandler,
     ExportHandler,
     SERVICE_SETTINGS_KEY,
@@ -104,5 +105,6 @@ class FreeBSDLaboratoryApp(ExtensionApp):
                 (r"/freebsd-lab/api/ai/models", AIModelsHandler),
                 (r"/freebsd-lab/api/ai/generate", AIGenerateHandler),
                 (r"/freebsd-lab/api/ai/agent", AIAgentHandler),
+                (r"/freebsd-lab/api/ai/usage", AIUsageHandler),
             ]
         )

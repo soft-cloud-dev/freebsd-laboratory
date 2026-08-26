@@ -128,3 +128,14 @@ class AIAgentHandler(LaboratoryHandler):
             max_runtime=max_runtime,
         )
         self.finish_json({"ok": True, "result": result})
+
+
+class AIUsageHandler(LaboratoryHandler):
+    def get(self) -> None:
+        from . import ai
+        self.finish_json({"ok": True, "usage": ai.token_usage()})
+
+    def post(self) -> None:
+        from . import ai
+        ai.reset_token_usage()
+        self.finish_json({"ok": True, "usage": ai.token_usage()})
