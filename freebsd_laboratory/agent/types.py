@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Union
 
 
 @dataclass(frozen=True)
@@ -56,7 +57,7 @@ class FinalAnswer:
     answer: str
 
 
-Action = Command | FinalAnswer
+Action = Union[Command, FinalAnswer]
 
 
 @dataclass(frozen=True)
