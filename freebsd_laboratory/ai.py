@@ -337,12 +337,13 @@ def list_models(models_dir: str | Path = "/home/freebsd/models") -> list[dict[st
                     "size_mb": round(size_mb, 1),
                     "size_gb": round(size_mb / 1024, 2),
                 })
-        if models:
-            return models
+        return models
 
-    # Fallback to host server API
-    try:
-        data = _query_server("/ai/models")
-        return data.get("models", [])
-    except Exception:
-        return []
+    # Fallback to host server API only when default models directory requested
+    if str(models_dir) == "/home/freebsd/models":
+        try:
+            data = _query_server("/ai/models")
+            return data.get("models", [])
+        except Exception:
+            return []
+    return []

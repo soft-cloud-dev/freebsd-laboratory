@@ -41,6 +41,12 @@ from freebsd_laboratory import ai
 class FreeBSDLabMagics(Magics):
     """Jupyter notebook magics for FreeBSD Laboratory AI inference and agent operations."""
 
+    def __init__(self, shell: Any = None, **kwargs: Any) -> None:
+        try:
+            super().__init__(shell=shell, **kwargs)
+        except Exception:
+            self.shell = shell
+
     def _parse_ai_args(self, line: str) -> tuple[argparse.Namespace, str]:
         parser = argparse.ArgumentParser(prog="%ai", add_help=False)
         parser.add_argument("--model", default=None, help="Path to GGUF model")
