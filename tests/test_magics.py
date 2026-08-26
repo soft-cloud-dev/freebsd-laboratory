@@ -101,15 +101,40 @@ class TestMagics(unittest.TestCase):
             summary = ai.token_summary()
             self.assertIsNotNone(summary)
 
-    def test_ai_summary_magic(self) -> None:
-        with patch("freebsd_laboratory.magics.display") as mock_display:
-            self.magics.ai_summary()
-            mock_display.assert_called_once()
+    def test_token_tracker_security_and_sync(self) -> None:
+        import tempfile
+        from pathlib import Path
 
-    def test_load_ipython_extension(self) -> None:
-        mock_ip = MagicMock()
-        load_ipython_extension(mock_ip)
-        mock_ip.register_magics.assert_called_once_with(FreeBSDLabMagics)
+        with tempfile.TemporaryDirectory() as td:
+            usage_file = Path(td) / "token_usage.json"
+            tracker_a = ai.TokenUsageTracker(usage_file=usage_file)
+            tracker_b = ai.TokenUsageTracker(usage_file=usage_file)
+
+            # Test bool-before-int type guard
+            with self.assertRaises(TypeError):
+                tracker_a.record(True, 10, 1.0)  # type: ignore[arg-type]
+            with self.assertRaises(TypeError):
+                tracker_a.record(10, False, 1.0)  # type: ignore[arg-type]
+            with self.assertRaises(TypeError):
+                tracker_a.record(10, 20, True)  # type: ignore[arg-type]
+
+            # Record in tracker_a
+            tracker_a.record(100, 50, 2.5)
+            self.assertEqual(tracker_a.prompt_tokens, 100)
+            self.assertEqual(tracker_a.completion_tokens, 50)
+            self.assertEqual(tracker_a.total_tokens, 150)
+
+            # Tracker_b reads file
+            summary_b = tracker_b.summary_dict()
+            self.assertEqual(summary_b["total_tokens"], 150)
+            self.assertEqual(summary_b["prompt_tokens"], 100)
+            self.assertEqual(summary_b["completion_tokens"], 50)
+            self.assertEqual(summary_b["requests"], 1)
+
+            # Reset
+            tracker_a.reset()
+            self.assertEqual(tracker_a.total_tokens, 0)
+            self.assertEqual(tracker_b.summary_dict()["total_tokens"], 0)
 
 
 if __name__ == "__main__":

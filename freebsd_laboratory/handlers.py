@@ -137,5 +137,13 @@ class AIUsageHandler(LaboratoryHandler):
 
     def post(self) -> None:
         from . import ai
-        ai.reset_token_usage()
+        document = self.get_json_body() or {}
+        action = document.get("action", "reset")
+        if action == "record":
+            prompt_tokens = document.get("prompt_tokens", 0)
+            completion_tokens = document.get("completion_tokens", 0)
+            elapsed_seconds = document.get("elapsed_seconds", 0.0)
+            ai._SESSION_TRACKER.record(prompt_tokens, completion_tokens, elapsed_seconds)
+        else:
+            ai.reset_token_usage()
         self.finish_json({"ok": True, "usage": ai.token_usage()})

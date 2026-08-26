@@ -22,37 +22,141 @@ from freebsd_laboratory.runtime_client import DEFAULT_RUNTIME_SOCKET
 _MODEL_CACHE: dict[str, Any] = {}
 
 
+# Shared session token file for cross-process sync (Kernel -> Server)
+DEFAULT_TOKEN_USAGE_FILE = Path(
+    os.environ.get("FREEBSD_LAB_TOKEN_USAGE_FILE", "/tmp/freebsd-lab-token-usage.json")
+)
+
+
 class TokenUsageTracker:
     """Tracks cumulative token usage and performance across a kernel session."""
 
-    def __init__(self) -> None:
+    def __init__(self, usage_file: Path | None = None) -> None:
         self.prompt_tokens: int = 0
         self.completion_tokens: int = 0
         self.total_tokens: int = 0
         self.request_count: int = 0
         self.total_elapsed_seconds: float = 0.0
+        self.usage_file = usage_file or DEFAULT_TOKEN_USAGE_FILE
+
+    def _read_file(self) -> dict[str, Any] | None:
+        path = self.usage_file
+        if path.is_symlink() or not path.is_file():
+            return None
+        try:
+            content = path.read_text(encoding="utf-8").strip()
+            if not content:
+                return None
+            data = json.loads(content)
+            if isinstance(data, dict):
+                return data
+        except Exception:
+            return None
+        return None
+
+    def _write_file(self, data: dict[str, Any]) -> None:
+        path = self.usage_file
+        if path.is_symlink():
+            path.unlink()
+        parent = path.parent
+        if parent.is_symlink():
+            return
+        parent.mkdir(parents=True, exist_ok=True)
+        temp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+        if temp.is_symlink():
+            temp.unlink()
+        temp.write_text(
+            json.dumps(data, sort_keys=True, separators=(",", ":")) + "\n",
+            encoding="utf-8",
+        )
+        os.chmod(temp, 0o600, follow_symlinks=False)
+        temp.replace(path)
+
+    def _sync_to_file(self, p: int, c: int, e: float) -> None:
+        try:
+            curr = self._read_file()
+            if curr:
+                new_p = curr.get("prompt_tokens", 0) + p
+                new_c = curr.get("completion_tokens", 0) + c
+                new_reqs = curr.get("requests", 0) + 1
+                new_e = curr.get("elapsed_seconds", 0.0) + e
+            else:
+                new_p = self.prompt_tokens
+                new_c = self.completion_tokens
+                new_reqs = self.request_count
+                new_e = self.total_elapsed_seconds
+
+            data = {
+                "requests": new_reqs,
+                "prompt_tokens": new_p,
+                "completion_tokens": new_c,
+                "total_tokens": new_p + new_c,
+                "elapsed_seconds": round(new_e, 2),
+            }
+            self._write_file(data)
+        except Exception:
+            pass
+
+    def _sync_to_server(self, p: int, c: int, e: float) -> None:
+        try:
+            _query_server(
+                "/ai/usage",
+                {
+                    "action": "record",
+                    "prompt_tokens": p,
+                    "completion_tokens": c,
+                    "elapsed_seconds": e,
+                },
+                timeout=1.0,
+            )
+        except Exception:
+            pass
 
     def record(
         self, prompt_tokens: int, completion_tokens: int, elapsed_seconds: float = 0.0
     ) -> None:
-        self.prompt_tokens += max(0, prompt_tokens)
-        self.completion_tokens += max(0, completion_tokens)
-        self.total_tokens += max(0, prompt_tokens + completion_tokens)
+        if (
+            isinstance(prompt_tokens, bool)
+            or isinstance(completion_tokens, bool)
+            or isinstance(elapsed_seconds, bool)
+        ):
+            raise TypeError("Boolean values are not valid token counts or durations")
+
+        p = max(0, int(prompt_tokens))
+        c = max(0, int(completion_tokens))
+        e = max(0.0, float(elapsed_seconds))
+
+        self.prompt_tokens += p
+        self.completion_tokens += c
+        self.total_tokens += p + c
         self.request_count += 1
-        self.total_elapsed_seconds += max(0.0, elapsed_seconds)
+        self.total_elapsed_seconds += e
+
+        self._sync_to_file(p, c, e)
+        self._sync_to_server(p, c, e)
 
     def summary_dict(self) -> dict[str, Any]:
-        tps = (
-            (self.completion_tokens / self.total_elapsed_seconds)
-            if self.total_elapsed_seconds > 0
-            else 0.0
-        )
+        file_data = self._read_file()
+        if file_data:
+            p = max(self.prompt_tokens, file_data.get("prompt_tokens", 0))
+            c = max(self.completion_tokens, file_data.get("completion_tokens", 0))
+            reqs = max(self.request_count, file_data.get("requests", 0))
+            e = max(self.total_elapsed_seconds, file_data.get("elapsed_seconds", 0.0))
+            total = p + c
+        else:
+            p = self.prompt_tokens
+            c = self.completion_tokens
+            reqs = self.request_count
+            e = self.total_elapsed_seconds
+            total = self.total_tokens
+
+        tps = (c / e) if e > 0 else 0.0
         return {
-            "requests": self.request_count,
-            "prompt_tokens": self.prompt_tokens,
-            "completion_tokens": self.completion_tokens,
-            "total_tokens": self.total_tokens,
-            "elapsed_seconds": round(self.total_elapsed_seconds, 2),
+            "requests": reqs,
+            "prompt_tokens": p,
+            "completion_tokens": c,
+            "total_tokens": total,
+            "elapsed_seconds": round(e, 2),
             "tokens_per_second": round(tps, 1),
         }
 
@@ -62,6 +166,21 @@ class TokenUsageTracker:
         self.total_tokens = 0
         self.request_count = 0
         self.total_elapsed_seconds = 0.0
+        try:
+            if self.usage_file.is_symlink():
+                self.usage_file.unlink()
+            elif self.usage_file.is_file():
+                self.usage_file.unlink()
+        except Exception:
+            pass
+        try:
+            _query_server(
+                "/ai/usage",
+                {"action": "reset"},
+                timeout=1.0,
+            )
+        except Exception:
+            pass
 
 
 # Session-lifetime singleton that resets whenever the kernel restarts
@@ -108,14 +227,16 @@ def _get_server_urls() -> list[str]:
     ]
 
 
-def _query_server(endpoint: str, payload: dict[str, Any] | None = None) -> Any:
+def _query_server(
+    endpoint: str, payload: dict[str, Any] | None = None, timeout: float = 300.0
+) -> Any:
     for base in _get_server_urls():
         url = f"{base}/freebsd-lab/api{endpoint}"
         try:
             req_data = json.dumps(payload).encode("utf-8") if payload is not None else None
             headers = {"Content-Type": "application/json"} if req_data else {}
             req = urllib.request.Request(url, data=req_data, headers=headers)
-            with urllib.request.urlopen(req, timeout=300.0) as resp:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
                 return data
         except Exception:

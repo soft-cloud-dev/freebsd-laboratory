@@ -579,6 +579,7 @@ const plugin: JupyterFrontEndPlugin<void> = {
           // Ignored if AI endpoint unavailable
         });
     };
+    window.setInterval(updateAllTokenBadges, 2000);
 
     const attachNotebook = async (panel: NotebookPanel): Promise<void> => {
       if (attachedNotebooks.has(panel)) {
