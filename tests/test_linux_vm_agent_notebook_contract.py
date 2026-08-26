@@ -2,6 +2,7 @@ import ast
 import json
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 NOTEBOOK_PATH = Path("notebooks/Build_Linux_VM_Agent.ipynb")
 
@@ -77,21 +78,24 @@ class TestLinuxVMAgentNotebookContract(unittest.TestCase):
         for name in required_tool_names:
             self.assertIn(f'name = "{name}"', all_code, f"Missing tool name registration: {name}")
 
-    def test_agent_controller_and_loop_execution(self) -> None:
-        # Extract and execute the framework, tools, and controller definitions
+    def _load_notebook_namespace(self) -> dict:
         code_cells = [c for c in self.nb_data["cells"] if c["cell_type"] == "code"]
         combined_source = []
         for cell in code_cells:
             for line in "".join(cell["source"]).splitlines():
-                # Filter out interactive IPython display calls
-                if "IPython.display" in line or "display(" in line:
-                    continue
                 if line.strip().startswith("%") or line.strip().startswith("!"):
                     continue
                 combined_source.append(line)
 
-        namespace = {}
+        namespace = {
+            "display": lambda *args, **kwargs: None,
+            "Markdown": lambda data: data,
+        }
         exec("\n".join(combined_source), namespace)
+        return namespace
+
+    def test_agent_controller_and_loop_execution(self) -> None:
+        namespace = self._load_notebook_namespace()
 
         self.assertIn("ToolRegistry", namespace)
         self.assertIn("LinuxVMAgentController", namespace)
@@ -99,12 +103,28 @@ class TestLinuxVMAgentNotebookContract(unittest.TestCase):
         registry = namespace["registry"]
         self.assertGreaterEqual(len(registry.list_tools()), 11)
 
-        controller = namespace["LinuxVMAgentController"](registry=registry, max_steps=12)
+        controller = namespace["LinuxVMAgentController"](registry=registry, max_steps=12, use_llm=False)
         goal = "Build a bootable Linux bhyve golden VM image from scratch."
         result = controller.run(goal)
 
         self.assertIn("Linux bhyve golden VM image built successfully", result)
         self.assertGreaterEqual(len(controller.evidence_events), 8)
+
+    def test_agent_controller_with_llm_inference(self) -> None:
+        namespace = self._load_notebook_namespace()
+        registry = namespace["registry"]
+
+        llm_turns = [
+            "THOUGHT: I need to verify host prerequisites.\nACTION: tool_check_prerequisites\nARGS: {\"check_storage\": true}",
+            "THOUGHT: Prerequisites verified. Completing task.\nFINAL: Golden image verification complete.",
+        ]
+
+        mock_generate = unittest.mock.MagicMock(side_effect=llm_turns)
+        with unittest.mock.patch("freebsd_laboratory.ai.generate", mock_generate):
+            controller = namespace["LinuxVMAgentController"](registry=registry, max_steps=5, use_llm=True)
+            res = controller.run("Build a Linux VM from scratch")
+            self.assertEqual(res, "Golden image verification complete.")
+            self.assertEqual(mock_generate.call_count, 2)
 
 
 if __name__ == "__main__":
