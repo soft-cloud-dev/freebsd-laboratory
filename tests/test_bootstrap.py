@@ -39,6 +39,7 @@ def test_bootstrap_uses_freebsd_binary_runtime_dependencies() -> None:
     assert '"${PY_TAG}-jupyterlab"' in text
     assert '"${PY_TAG}-cryptography"' in text
     assert '"${PY_TAG}-pyyaml"' in text
+    assert '"${PY_TAG}-llama-cpp-python"' in text
     assert "--no-deps" in text
     assert "--no-build-isolation" not in text
     assert 'pip install -e ".[dev]"' not in text

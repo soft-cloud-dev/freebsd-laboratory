@@ -190,6 +190,7 @@ pkg install -y \
     "${PY_TAG}-cryptography" \
     "${PY_TAG}-pytest" \
     "${PY_TAG}-pyyaml" \
+    "${PY_TAG}-llama-cpp-python" \
     "${PY_TAG}-certifi" \
     "${PY_TAG}-urllib3"
 
