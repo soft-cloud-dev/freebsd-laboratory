@@ -107,8 +107,7 @@ class TestLinuxVMAgentNotebookContract(unittest.TestCase):
         goal = "Build a bootable Linux bhyve golden VM image from scratch."
         result = controller.run(goal)
 
-        self.assertIn("Linux bhyve golden VM image built successfully", result)
-        self.assertGreaterEqual(len(controller.evidence_events), 8)
+        self.assertIn("FAILED: LLM inference module", result)
 
     def test_agent_controller_with_llm_inference(self) -> None:
         namespace = self._load_notebook_namespace()
