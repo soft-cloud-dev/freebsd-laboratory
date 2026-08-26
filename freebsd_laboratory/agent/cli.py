@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from pathlib import Path
 
@@ -12,16 +13,44 @@ from .policy import AgentPolicy
 from .runtime import AgentRuntime
 
 
+def resolve_default_model(explicit_path: str | None) -> str | None:
+    if explicit_path:
+        return explicit_path
+    env_model = os.environ.get("FREEBSD_LAB_AGENT_MODEL")
+    if env_model:
+        p = Path(env_model)
+        if p.is_file() and not p.is_symlink():
+            return env_model
+    candidates = [
+        Path("/home/freebsd/models/qwen2.5-1.5b-instruct-q4_k_m.gguf"),
+        Path("/home/freebsd/models/gemma-2-2b-it-Q4_K_M.gguf"),
+    ]
+    for c in candidates:
+        if c.is_file() and not c.is_symlink():
+            return str(c)
+    models_dir = Path("/home/freebsd/models")
+    if models_dir.is_dir() and not models_dir.is_symlink():
+        for f in models_dir.glob("*.gguf"):
+            if f.is_file() and not f.is_symlink():
+                return str(f)
+    return None
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="freebsd-lab-agent",
         description="Run an unprivileged autonomous agent in an isolated FreeBSD runtime.",
     )
-    parser.add_argument("goal", help="Task description or goal for the agent")
+    parser.add_argument(
+        "goal",
+        nargs="?",
+        default=None,
+        help="Task description or goal for the agent (prompts interactively if omitted)",
+    )
     parser.add_argument(
         "--model",
-        required=True,
-        help="Path to local GGUF model file",
+        default=None,
+        help="Path to local GGUF model file (default: $FREEBSD_LAB_AGENT_MODEL or /home/freebsd/models/*.gguf)",
     )
     parser.add_argument(
         "--mode",
@@ -88,12 +117,28 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> None:
     args = parse_args(argv)
 
+    goal = args.goal
+    if not goal:
+        if sys.stdin.isatty():
+            try:
+                goal = input("\033[1;36m[FreeBSD AI Agent]\033[0m Goal: ").strip()
+            except (EOFError, KeyboardInterrupt):
+                sys.exit(0)
+        if not goal:
+            sys.exit("Error: No goal provided.")
+
+    resolved_model = resolve_default_model(args.model)
+    if not resolved_model:
+        sys.exit(
+            "Error: --model must be specified or a valid GGUF model placed in /home/freebsd/models/"
+        )
+
     if args.max_steps < 1 or args.max_steps > 25:
         sys.exit("Error: --max-steps must be between 1 and 25.")
 
-    model_path = Path(args.model)
+    model_path = Path(resolved_model)
     if model_path.is_symlink() or not model_path.is_file():
-        sys.exit(f"Error: Model path must be a regular file, not a symlink: {args.model}")
+        sys.exit(f"Error: Model path must be a regular file, not a symlink: {resolved_model}")
 
     startup_timeout = args.startup_timeout
     if startup_timeout is None:
@@ -124,7 +169,7 @@ def main(argv: list[str] | None = None) -> None:
 
     try:
         model = AgentModel(
-            model_path=args.model,
+            model_path=resolved_model,
             n_ctx=args.n_ctx,
             n_gpu_layers=args.n_gpu_layers,
         )
@@ -134,7 +179,7 @@ def main(argv: list[str] | None = None) -> None:
             policy=policy,
             evidence_log=evidence_log,
         )
-        result = controller.run(args.goal)
+        result = controller.run(goal)
         print(result)
     finally:
         if evidence_log is not None:
