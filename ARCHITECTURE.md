@@ -337,6 +337,38 @@ Agent evidence is a standalone durable append-only JSONL log recording SHA-256 h
 
 Cleanup on `SIGINT`/`SIGTERM` destroys the runtime synchronously. After `SIGKILL`, crashes, or power loss, daemon stale-owner reconciliation reclaims orphaned runtimes.
 
+## In-Notebook AI & Extension Architecture
+
+The in-notebook AI subsystem (`freebsd_laboratory.ai` and `freebsd_laboratory.magics`) integrates local inference into the JupyterLab environment:
+
+```text
+┌────────────────────────────────────────────────────────┐
+│  JupyterLab Notebook Toolbar                           │
+│  [ ⇩ Export evidence ] [ ⚡ Tokens: N ] [ Kernel ⚙ ]    │
+└────────────┬────────────────────────────┬──────────────┘
+             │ %ai / %%ai / %agent        │ cell execution
+             ▼                            ▼
+┌────────────────────────────┐    ┌──────────────────────┐
+│  IPython Kernel            │    │ NotebookActions      │
+│  (Host or Guest Runtime)   │    │ observer             │
+└────────────┬───────────────┘    └──────────┬───────────┘
+             │                               │
+    ┌────────┴────────┐                      │
+    ▼                 ▼                      │
+In-Process LLM    Server REST Proxy          │
+(llama-cpp on     POST /freebsd-lab/api/ai/* │
+Host Kernel)      (Guest Runtime Fallback)   │
+    │                 │                      │
+    └────────┬────────┘                      │
+             │ token usage tracking          │
+             ▼                               ▼
+    Session Token Tracker ──────► GET /api/ai/usage (Badge Sync)
+```
+
+1. **Host Kernel Execution**: Running under `freebsd-python-host` provides native in-process inference with AVX2 SIMD acceleration and in-memory model caching across cell executions.
+2. **Server REST Proxy Fallback**: When cells execute in guest runtimes (jails or bhyve VMs) lacking local model files, `freebsd_laboratory.ai` automatically proxies generation requests through the host Jupyter Server extension API (`/freebsd-lab/api/ai/*`).
+3. **Session Token Tracking**: The kernel session accumulates prompt, completion, and total tokens across queries. The live toolbar badge (`freebsdLab-TokenBadge`) syncs via `GET /freebsd-lab/api/ai/usage` and automatically resets when the kernel restarts.
+
 ## Remaining validation boundary
 
 Linux CI validates portable protocol logic, ownership policy, PID fingerprints, reconciliation, concurrent tunnel-port lease allocation, bounded evidence, signing, SSH tunnel construction, shell syntax, Ruff, and Python/TypeScript builds. It cannot prove actual FreeBSD behavior for `LOCAL_PEERCRED`, PF, `jail(8)`, `epair(4)`, ZFS, bhyve, the release image build, or `rc.d` boot ordering.
