@@ -14,7 +14,8 @@ class KernelWalkaroundSpec:
     identity_cmd: str
     security_boundary: str
     boundary_diagram: str
-    agent_cmd: str
+    agent_prompt: str
+    ai_prompt: str
     startup_timeout_seconds: int
     extra_constraints: Optional[str] = None
 
@@ -42,18 +43,14 @@ KERNEL_WALKAROUNDS: Dict[str, KernelWalkaroundSpec] = {
             "    epair --> Jail[VNET Jail]\n"
             "    Jail --> Kernel[Python / ipykernel]"
         ),
-        agent_cmd=(
-            "%%agent\n"
-            "Perform a read-only inspection of this runtime.\n\n"
-            "Determine:\n"
-            "- operating system and kernel\n"
-            "- whether jail virtualization is observable\n"
-            "- current user\n"
-            "- memory availability\n"
-            "- network interfaces\n"
-            "- listening TCP sockets\n\n"
-            "Do not use sudo, modify files, install packages, or make external network requests.\n"
-            "Summarize how the observations relate to this notebook's stated security boundary."
+        ai_prompt=(
+            "%ai Based on the output above, explain which observations demonstrate the identity "
+            "of this VNET jail runtime and which observations do NOT prove anything about the host-side PF policy or daemon."
+        ),
+        agent_prompt=(
+            "%%agent --mode jail --steps 8\n"
+            "Perform a read-only inspection of this VNET jail runtime.\n"
+            "Determine operating system, memory, network interfaces, and listening sockets."
         ),
         startup_timeout_seconds=30,
     ),
@@ -79,18 +76,14 @@ KERNEL_WALKAROUNDS: Dict[str, KernelWalkaroundSpec] = {
             "    Tap --> VM[bhyve VM]\n"
             "    VM --> Kernel[Python / ipykernel]"
         ),
-        agent_cmd=(
-            "%%agent\n"
-            "Perform a read-only inspection of this runtime.\n\n"
-            "Determine:\n"
-            "- operating system and kernel\n"
-            "- whether virtualization is observable\n"
-            "- current user\n"
-            "- memory availability\n"
-            "- network interfaces\n"
-            "- listening TCP sockets\n\n"
-            "Do not use sudo, modify files, install packages, or make external network requests.\n"
-            "Summarize how the observations relate to this notebook's stated security boundary."
+        ai_prompt=(
+            "%ai Based on the output above, explain which observations demonstrate that "
+            "this kernel runs in a FreeBSD bhyve guest and which observations do NOT prove anything about host PF."
+        ),
+        agent_prompt=(
+            "%%agent --mode bhyve --steps 8\n"
+            "Perform a read-only inspection of this bhyve guest runtime.\n"
+            "Determine OS, virtual hardware identity, interfaces, and listening sockets."
         ),
         startup_timeout_seconds=90,
     ),
@@ -117,18 +110,14 @@ KERNEL_WALKAROUNDS: Dict[str, KernelWalkaroundSpec] = {
             "    Tap --> VM[Linux bhyve VM]\n"
             "    VM --> Kernel[Python / ipykernel]"
         ),
-        agent_cmd=(
-            "%%agent\n"
-            "Perform a read-only inspection of this runtime.\n\n"
-            "Determine:\n"
-            "- operating system and kernel\n"
-            "- whether virtualization is observable\n"
-            "- current user\n"
-            "- memory availability\n"
-            "- network interfaces\n"
-            "- listening TCP sockets\n\n"
-            "Do not use sudo, modify files, install packages, or make external network requests.\n"
-            "Summarize how the observations relate to this notebook's stated security boundary."
+        ai_prompt=(
+            "%ai Based on the output above, explain which observations demonstrate the Linux guest "
+            "execution environment and which observations do NOT prove anything about the host bhyve hypervisor setup."
+        ),
+        agent_prompt=(
+            "%%agent --mode bhyve --steps 8\n"
+            "Perform a read-only inspection of this Linux bhyve guest runtime.\n"
+            "Determine Linux kernel release, distribution identity, and network interfaces."
         ),
         startup_timeout_seconds=90,
         extra_constraints="Requires runtime daemon capability: bhyve.linux",
@@ -181,7 +170,7 @@ def make_walkaround(
     rel_kernel_json = kernel_json_path.relative_to(repo_root)
     rel_provisioner = provisioner_file.relative_to(repo_root)
 
-    has_ai_magics = (repo_root / "freebsd_laboratory" / "magics.py").exists()
+    is_host_kernel = "host" in kernel_name
 
     constraints_text = (
         f"- **Startup Timeout:** `{spec.startup_timeout_seconds}s`\n"
@@ -297,7 +286,7 @@ def make_walkaround(
         },
     ]
 
-    if has_ai_magics:
+    if is_host_kernel:
         cells.extend([
             {
                 "cell_type": "markdown",
@@ -312,10 +301,7 @@ def make_walkaround(
                 "execution_count": None,
                 "metadata": {},
                 "outputs": [],
-                "source": [
-                    "%ai Based on the output above, explain which observations demonstrate the identity "
-                    "of this runtime and which observations do NOT prove anything about the host-side PF policy or daemon."
-                ],
+                "source": [spec.ai_prompt],
             },
             {
                 "cell_type": "markdown",
@@ -330,18 +316,34 @@ def make_walkaround(
                 "execution_count": None,
                 "metadata": {},
                 "outputs": [],
-                "source": [spec.agent_cmd],
+                "source": [spec.agent_prompt],
             },
         ])
     else:
-        cells.append({
-            "cell_type": "markdown",
-            "metadata": {},
-            "source": [
-                "## 6. Interpret the Evidence & 7. Bounded Investigation\n",
-                "*Note: In-notebook AI and autonomous agent extensions (`magics.py`) are not active in this environment.*\n",
-            ],
-        })
+        cells.extend([
+            {
+                "cell_type": "markdown",
+                "metadata": {},
+                "source": [
+                    "## 6. Interpret the Evidence\n",
+                    "In the host management environment (`freebsd-python-host`), the `%ai` magic queries the locally hosted LLM to interpret runtime findings. "
+                    "Inside this isolated guest runtime, direct network connectivity to the host Jupyter server HTTP endpoints is blocked by packet filtering (PF). "
+                    "On the host control plane, an interpretation query is formulated as:\n\n",
+                    f"```python\n{spec.ai_prompt}\n```\n",
+                ],
+            },
+            {
+                "cell_type": "markdown",
+                "metadata": {},
+                "source": [
+                    "## 7. Bounded Investigation\n",
+                    "Autonomous agent tasks (`%%agent` or `freebsd-lab-agent`) are launched and governed on the **FreeBSD host control plane**, "
+                    "where the controller connects to `/var/run/freebsd-laboratory/runtime.sock` to provision disposable runtimes. "
+                    "An autonomous investigation dispatched from the host control plane follows this pattern:\n\n",
+                    f"```python\n{spec.agent_prompt}\n```\n",
+                ],
+            },
+        ])
 
     cells.extend([
         {

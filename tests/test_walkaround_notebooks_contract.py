@@ -72,6 +72,8 @@ class TestWalkaroundNotebooksContract(unittest.TestCase):
             "## 3. How It Is Launched",
             "## 4. Runtime Security Boundary",
             "## 5. Inspect the Runtime",
+            "## 6. Interpret the Evidence",
+            "## 7. Bounded Investigation",
             "## 8. What You Cannot See",
             "## 9. Summary & Design Invariants",
         ]
