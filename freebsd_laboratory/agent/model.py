@@ -150,7 +150,27 @@ class AgentModel:
 
     def next_action(self, goal: str, observations: list[Observation]) -> Action:
         messages = self._build_messages(goal, observations)
-        response: dict[str, Any] = self.llm.create_chat_completion(messages=messages)
+        try:
+            response: dict[str, Any] = self.llm.create_chat_completion(messages=messages)
+        except ValueError as exc:
+            if "system" in str(exc).lower():
+                # Merge system prompt into first user turn for models like Gemma that reject the system role
+                merged_messages: list[dict[str, str]] = []
+                system_content = ""
+                for m in messages:
+                    if m["role"] == "system":
+                        system_content = m["content"]
+                    elif m["role"] == "user" and system_content:
+                        merged_messages.append(
+                            {"role": "user", "content": f"{system_content}\n\n{m['content']}"}
+                        )
+                        system_content = ""
+                    else:
+                        merged_messages.append(m)
+                response = self.llm.create_chat_completion(messages=merged_messages)
+            else:
+                raise
+
         choices = response.get("choices", [])
         if not choices:
             return FinalAnswer("Task ended: model returned no response.")

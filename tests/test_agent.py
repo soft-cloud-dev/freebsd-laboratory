@@ -476,5 +476,33 @@ class TestControllerIntegration(unittest.TestCase):
         mock_runtime.destroy.assert_called_once_with(mock_handle)
 
 
+class TestAgentModelSystemRoleFallback(unittest.TestCase):
+    def test_system_role_rejection_merges_into_first_user_turn(self) -> None:
+        model = object.__new__(AgentModel)
+        model.llm = MagicMock()
+        model.n_ctx = 2048
+        model._token_count = lambda text: len(text.split())
+
+        # First call with system role raises ValueError (like Gemma 2 chat template)
+        # Second call with merged system prompt into user turn succeeds
+        def fake_create_chat_completion(messages: list[dict[str, str]]) -> dict:
+            for m in messages:
+                if m["role"] == "system":
+                    raise ValueError("System role not supported")
+            return {"choices": [{"message": {"content": "COMMAND: sysctl hw.model"}}]}
+
+        model.llm.create_chat_completion.side_effect = fake_create_chat_completion
+
+        action = model.next_action("Inspect CPU model", [])
+        self.assertIsInstance(action, Command)
+        self.assertEqual(action.command, "sysctl hw.model")
+        # Should have called create_chat_completion twice: initial + retry with merged user message
+        self.assertEqual(model.llm.create_chat_completion.call_count, 2)
+        second_call_messages = model.llm.create_chat_completion.call_args_list[1][1]["messages"]
+        self.assertEqual(len(second_call_messages), 1)
+        self.assertEqual(second_call_messages[0]["role"], "user")
+        self.assertIn("GOAL: Inspect CPU model", second_call_messages[0]["content"])
+
+
 if __name__ == "__main__":
     unittest.main()
