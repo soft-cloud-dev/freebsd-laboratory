@@ -101,6 +101,17 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Number of GPU layers for llama.cpp offloading (default: 0)",
     )
     parser.add_argument(
+        "--backend",
+        choices=["auto", "llama_cpp", "vllm", "vllm_server"],
+        default="auto",
+        help="Inference engine backend (default: auto)",
+    )
+    parser.add_argument(
+        "--vllm-url",
+        default=None,
+        help="OpenAI-compatible HTTP endpoint for vLLM server (default: $VLLM_BASE_URL or http://localhost:8000/v1)",
+    )
+    parser.add_argument(
         "--evidence-dir",
         type=str,
         default=None,
@@ -127,18 +138,24 @@ def main(argv: list[str] | None = None) -> None:
         if not goal:
             sys.exit("Error: No goal provided.")
 
-    resolved_model = resolve_default_model(args.model)
-    if not resolved_model:
-        sys.exit(
-            "Error: --model must be specified or a valid GGUF model placed in /home/freebsd/models/"
-        )
+    resolved_model = None
+    if args.backend != "vllm_server":
+        resolved_model = resolve_default_model(args.model)
+        if not resolved_model and args.backend != "vllm":
+            sys.exit(
+                "Error: --model must be specified or a valid GGUF model placed in /home/freebsd/models/"
+            )
+    else:
+        resolved_model = args.model or "default"
 
     if args.max_steps < 1 or args.max_steps > 25:
         sys.exit("Error: --max-steps must be between 1 and 25.")
 
-    model_path = Path(resolved_model)
-    if model_path.is_symlink() or not model_path.is_file():
-        sys.exit(f"Error: Model path must be a regular file, not a symlink: {resolved_model}")
+    if args.backend == "llama_cpp" or (args.backend == "auto" and not args.vllm_url and not os.environ.get("VLLM_BASE_URL")):
+        if resolved_model:
+            model_path = Path(resolved_model)
+            if model_path.is_symlink() or not model_path.is_file():
+                sys.exit(f"Error: Model path must be a regular file, not a symlink: {resolved_model}")
 
     startup_timeout = args.startup_timeout
     if startup_timeout is None:
@@ -172,6 +189,8 @@ def main(argv: list[str] | None = None) -> None:
             model_path=resolved_model,
             n_ctx=args.n_ctx,
             n_gpu_layers=args.n_gpu_layers,
+            backend=args.backend,
+            vllm_url=args.vllm_url,
         )
         controller = AgentController(
             model=model,
