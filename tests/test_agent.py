@@ -514,5 +514,20 @@ class TestAgentModelSystemRoleFallback(unittest.TestCase):
         self.assertIn("GOAL: Inspect CPU model", second_call_messages[0]["content"])
 
 
+class TestAgentCLIModelResolution(unittest.TestCase):
+    def test_explicit_path_returned(self) -> None:
+        from freebsd_laboratory.agent.cli import resolve_default_model
+        self.assertEqual(resolve_default_model("/tmp/custom.gguf"), "/tmp/custom.gguf")
+
+    def test_gemma_4_preferred_in_candidate_list(self) -> None:
+        from freebsd_laboratory.agent.cli import resolve_default_model
+        with unittest.mock.patch("pathlib.Path.is_file") as mock_is_file, \
+             unittest.mock.patch("pathlib.Path.is_symlink", return_value=False):
+            # First candidate (/home/freebsd/models/google_gemma-4-E2B-it-Q4_K_M.gguf) exists
+            mock_is_file.return_value = True
+            resolved = resolve_default_model(None)
+            self.assertEqual(resolved, "/home/freebsd/models/google_gemma-4-E2B-it-Q4_K_M.gguf")
+
+
 if __name__ == "__main__":
     unittest.main()

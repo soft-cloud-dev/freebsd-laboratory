@@ -22,6 +22,8 @@ def resolve_default_model(explicit_path: str | None) -> str | None:
         if p.is_file() and not p.is_symlink():
             return env_model
     candidates = [
+        Path("/home/freebsd/models/google_gemma-4-E2B-it-Q4_K_M.gguf"),
+        Path("/home/freebsd/models/google_gemma-4-E2B-it-IQ2_M.gguf"),
         Path("/home/freebsd/models/qwen2.5-1.5b-instruct-q4_k_m.gguf"),
         Path("/home/freebsd/models/gemma-2-2b-it-Q4_K_M.gguf"),
     ]
