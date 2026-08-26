@@ -112,6 +112,25 @@ class FreeBSDLabMagics(Magics):
         display(Markdown(f"### Agent Diagnostic Report\n\n```text\n{output}\n```"))
         return None
 
+    @line_magic
+    def ai_summary(self, line: str = "") -> Any:
+        """Display summary card of cumulative token usage in the current kernel session."""
+        display(ai.token_summary())
+        return None
+
+    @line_magic
+    def ai_usage(self, line: str = "") -> Any:
+        """Display summary card of cumulative token usage in the current kernel session."""
+        display(ai.token_summary())
+        return None
+
+    @line_magic
+    def ai_reset(self, line: str = "") -> Any:
+        """Reset the session token usage counters."""
+        ai.reset_token_usage()
+        print("Session token usage counter reset to 0.")
+        return None
+
 
 def load_ipython_extension(ipython: Any) -> None:
     """Register magics when extension is loaded via %load_ext freebsd_laboratory.magics."""

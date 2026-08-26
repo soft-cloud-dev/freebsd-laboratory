@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -19,6 +20,82 @@ from freebsd_laboratory.runtime_client import DEFAULT_RUNTIME_SOCKET
 
 # In-memory cache of loaded Llama instances by model path
 _MODEL_CACHE: dict[str, Any] = {}
+
+
+class TokenUsageTracker:
+    """Tracks cumulative token usage and performance across a kernel session."""
+
+    def __init__(self) -> None:
+        self.prompt_tokens: int = 0
+        self.completion_tokens: int = 0
+        self.total_tokens: int = 0
+        self.request_count: int = 0
+        self.total_elapsed_seconds: float = 0.0
+
+    def record(
+        self, prompt_tokens: int, completion_tokens: int, elapsed_seconds: float = 0.0
+    ) -> None:
+        self.prompt_tokens += max(0, prompt_tokens)
+        self.completion_tokens += max(0, completion_tokens)
+        self.total_tokens += max(0, prompt_tokens + completion_tokens)
+        self.request_count += 1
+        self.total_elapsed_seconds += max(0.0, elapsed_seconds)
+
+    def summary_dict(self) -> dict[str, Any]:
+        tps = (
+            (self.completion_tokens / self.total_elapsed_seconds)
+            if self.total_elapsed_seconds > 0
+            else 0.0
+        )
+        return {
+            "requests": self.request_count,
+            "prompt_tokens": self.prompt_tokens,
+            "completion_tokens": self.completion_tokens,
+            "total_tokens": self.total_tokens,
+            "elapsed_seconds": round(self.total_elapsed_seconds, 2),
+            "tokens_per_second": round(tps, 1),
+        }
+
+    def reset(self) -> None:
+        self.prompt_tokens = 0
+        self.completion_tokens = 0
+        self.total_tokens = 0
+        self.request_count = 0
+        self.total_elapsed_seconds = 0.0
+
+
+# Session-lifetime singleton that resets whenever the kernel restarts
+_SESSION_TRACKER = TokenUsageTracker()
+
+
+def token_usage() -> dict[str, Any]:
+    """Return dictionary of cumulative token usage in the current kernel session."""
+    return _SESSION_TRACKER.summary_dict()
+
+
+def reset_token_usage() -> None:
+    """Reset cumulative token usage counter for current kernel session."""
+    _SESSION_TRACKER.reset()
+
+
+def token_summary() -> Any:
+    """Return rendered Markdown summary card of cumulative token usage in current session."""
+    u = token_usage()
+    md_text = (
+        "| Metric | Value |\n"
+        "|:---|:---:|\n"
+        f"| **Total Tokens Used** | **`{u['total_tokens']:,}`** |\n"
+        f"| ↳ Prompt / Ingested Tokens | `{u['prompt_tokens']:,}` |\n"
+        f"| ↳ Generated Completion Tokens | `{u['completion_tokens']:,}` |\n"
+        f"| **Total Requests** | `{u['requests']}` |\n"
+        f"| **Total Inference Time** | `{u['elapsed_seconds']:.2f} s` |\n"
+        f"| **Average Generation Speed** | `{u['tokens_per_second']:.1f} tok/s` |\n"
+    )
+    try:
+        from IPython.display import Markdown
+        return Markdown(md_text)
+    except ImportError:
+        return md_text
 
 
 def _get_server_urls() -> list[str]:
@@ -93,7 +170,8 @@ def generate(
     system_prompt: str | None = None,
     n_ctx: int = 2048,
 ) -> str:
-    """Generate raw text completion from the local LLM, with automatic fallback to Jupyter Server API."""
+    """Generate raw text completion from the local LLM, tracking cumulative token usage."""
+    t0 = time.perf_counter()
     try:
         llm = get_cached_llama(model_path=model_path, n_ctx=n_ctx)
         messages = []
@@ -118,12 +196,18 @@ def generate(
             else:
                 raise
 
+        elapsed = time.perf_counter() - t0
         choices = response.get("choices", [])
-        if not choices:
-            return ""
-        return choices[0].get("message", {}).get("content", "") or ""
+        content = choices[0].get("message", {}).get("content", "") or "" if choices else ""
+
+        usage = response.get("usage", {})
+        prompt_tokens = usage.get("prompt_tokens") or len(llm.tokenize(prompt.encode("utf-8")))
+        completion_tokens = usage.get("completion_tokens") or len(llm.tokenize(content.encode("utf-8")))
+        _SESSION_TRACKER.record(prompt_tokens, completion_tokens, elapsed)
+
+        return content
     except Exception:
-        # Fallback to host Jupyter Server endpoint (e.g. when executing inside guest runtime)
+        # Fallback to host Jupyter Server endpoint
         data = _query_server(
             "/ai/generate",
             {
@@ -134,7 +218,13 @@ def generate(
                 "system_prompt": system_prompt,
             },
         )
-        return data.get("result", "")
+        elapsed = time.perf_counter() - t0
+        res = data.get("result", "")
+        usage = data.get("usage", {})
+        prompt_tokens = usage.get("prompt_tokens", len(prompt) // 4)
+        completion_tokens = usage.get("completion_tokens", len(res) // 4)
+        _SESSION_TRACKER.record(prompt_tokens, completion_tokens, elapsed)
+        return res
 
 
 def ask(
@@ -143,6 +233,7 @@ def ask(
     max_tokens: int = 512,
     temperature: float = 0.0,
     system_prompt: str = "You are a knowledgeable FreeBSD and Unix systems engineering assistant.",
+    show_usage: bool = False,
 ) -> Any:
     """Query the model and return rich Markdown display for Jupyter Notebooks."""
     text = generate(
@@ -152,6 +243,10 @@ def ask(
         temperature=temperature,
         system_prompt=system_prompt,
     )
+
+    if show_usage:
+        u = token_usage()
+        text += f"\n\n---\n*Session Token Usage: {u['total_tokens']:,} tokens across {u['requests']} request(s)*"
 
     try:
         from IPython.display import Markdown
@@ -170,6 +265,7 @@ def run_agent(
     evidence_dir: str | None = None,
 ) -> str:
     """Run an autonomous troubleshooting agent in an isolated jail or bhyve VM."""
+    t0 = time.perf_counter()
     try:
         resolved = resolve_default_model(str(model_path) if model_path else None)
         if not resolved:
@@ -201,7 +297,11 @@ def run_agent(
                 policy=policy,
                 evidence_log=evidence_log,
             )
-            return controller.run(goal)
+            result = controller.run(goal)
+            elapsed = time.perf_counter() - t0
+            # Rough approximation for multi-turn agent token usage
+            _SESSION_TRACKER.record(len(goal) // 4, len(result) // 4, elapsed)
+            return result
         finally:
             if evidence_log is not None:
                 evidence_log.close()
@@ -217,7 +317,10 @@ def run_agent(
                 "max_runtime": max_runtime,
             },
         )
-        return data.get("result", "")
+        elapsed = time.perf_counter() - t0
+        res = data.get("result", "")
+        _SESSION_TRACKER.record(len(goal) // 4, len(res) // 4, elapsed)
+        return res
 
 
 def list_models(models_dir: str | Path = "/home/freebsd/models") -> list[dict[str, Any]]:

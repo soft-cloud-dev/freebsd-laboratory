@@ -75,6 +75,37 @@ class TestMagics(unittest.TestCase):
             self.assertEqual(mock_run.call_args[1]["max_steps"], 5)
             self.assertEqual(mock_run.call_args[1]["goal"], "Check disk space")
 
+    def test_token_tracking_and_summary(self) -> None:
+        ai.reset_token_usage()
+        u0 = ai.token_usage()
+        self.assertEqual(u0["total_tokens"], 0)
+        self.assertEqual(u0["requests"], 0)
+
+        with patch("freebsd_laboratory.ai.get_cached_llama") as mock_get:
+            mock_llm = MagicMock()
+            mock_llm.create_chat_completion.return_value = {
+                "choices": [{"message": {"content": "Test answer"}}],
+                "usage": {"prompt_tokens": 10, "completion_tokens": 25, "total_tokens": 35},
+            }
+            mock_get.return_value = mock_llm
+
+            res = ai.generate("Test prompt")
+            self.assertEqual(res, "Test answer")
+
+            u1 = ai.token_usage()
+            self.assertEqual(u1["prompt_tokens"], 10)
+            self.assertEqual(u1["completion_tokens"], 25)
+            self.assertEqual(u1["total_tokens"], 35)
+            self.assertEqual(u1["requests"], 1)
+
+            summary = ai.token_summary()
+            self.assertIsNotNone(summary)
+
+    def test_ai_summary_magic(self) -> None:
+        with patch("freebsd_laboratory.magics.display") as mock_display:
+            self.magics.ai_summary()
+            mock_display.assert_called_once()
+
     def test_load_ipython_extension(self) -> None:
         mock_ip = MagicMock()
         load_ipython_extension(mock_ip)
