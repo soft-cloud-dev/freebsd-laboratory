@@ -91,7 +91,8 @@ class TestLinuxVMAgentNotebookContract(unittest.TestCase):
             "display": lambda *args, **kwargs: None,
             "Markdown": lambda data: data,
         }
-        exec("\n".join(combined_source), namespace)
+        with patch("freebsd_laboratory.ai.generate", return_value="FINAL: Golden image verification complete."):
+            exec("\n".join(combined_source), namespace)
         return namespace
 
     def test_agent_controller_and_loop_execution(self) -> None:
