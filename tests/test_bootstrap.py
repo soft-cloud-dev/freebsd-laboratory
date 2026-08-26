@@ -68,6 +68,7 @@ def test_bootstrap_creates_venv_local_jupyter_entrypoints() -> None:
         'install_python_entrypoint "$JUPYTER_VENV/bin/jupyter-labextension" '
         "jupyterlab.labextensions main" in text
     )
+    assert 'ln -sf "$JUPYTER_VENV/bin/freebsd-lab-agent" /usr/local/bin/freebsd-lab-agent' in text
 
 
 def test_bootstrap_registers_server_extension_without_broken_enable_cli() -> None:

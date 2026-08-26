@@ -287,6 +287,7 @@ install_python_entrypoint "$JUPYTER_VENV/bin/jupyter" jupyter_core.command main
 install_python_entrypoint "$JUPYTER_VENV/bin/jupyter-server" jupyter_server.serverapp main
 install_python_entrypoint "$JUPYTER_VENV/bin/jupyter-lab" jupyterlab.labapp main
 install_python_entrypoint "$JUPYTER_VENV/bin/jupyter-labextension" jupyterlab.labextensions main
+ln -sf "$JUPYTER_VENV/bin/freebsd-lab-agent" /usr/local/bin/freebsd-lab-agent
 
 log "Building and registering the JupyterLab extension"
 (
