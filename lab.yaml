@@ -10,6 +10,12 @@ runtime:
 executor:
   type: jail
   ephemeral: true
+  requires:
+    - ssh
+    - jupyter-kernel
+  artifact:
+    id: freebsd-jupyter-amd64
+    format: zfs-snapshot
   control:
     mode: unix-socket
     socket: /var/run/freebsd-laboratory/runtime.sock
@@ -31,6 +37,9 @@ executor:
       manager: vm-bhyve
       ephemeral: true
       template: freebsd-lab
+      artifact:
+        id: freebsd-jupyter-amd64
+        format: raw-disk-image
       image: freebsd-python.raw
       switch: freebsdlab
       bridge: labbridge0
@@ -40,6 +49,9 @@ executor:
       manager: vm-bhyve
       ephemeral: true
       template: linux-lab
+      artifact:
+        id: linux-alpine-jupyter-amd64
+        format: raw-disk-image
       image: linux-python.raw
       switch: freebsdlab
       bridge: labbridge0
