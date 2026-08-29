@@ -19,6 +19,7 @@ from .remote_kernel import (
     LocalPortReservation,
     SSHTransport,
     connection_ports,
+    create_runtime_ssh_key,
     release_jupyter_cached_ports,
     remote_kernel_command,
     restore_connection_file,
@@ -108,38 +109,10 @@ class RemoteRuntimeProvisioner(LocalProvisioner):
         return Path(self.runtime_dir).expanduser() / self._runtime_name
 
     def _create_runtime_key(self, runtime_path: Path) -> str:
-        private_key = runtime_path / "id_ed25519"
-        public_key = runtime_path / "id_ed25519.pub"
-        result = subprocess.run(
-            [
-                self.ssh_keygen_command,
-                "-q",
-                "-t",
-                "ed25519",
-                "-N",
-                "",
-                "-f",
-                str(private_key),
-            ],
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=15,
+        private_key, material = create_runtime_ssh_key(
+            runtime_path,
+            ssh_keygen_command=self.ssh_keygen_command,
         )
-        if result.returncode != 0:
-            detail = result.stderr.strip() or result.stdout.strip() or "ssh-keygen failed"
-            raise RuntimeError(
-                f"Unable to generate per-runtime SSH key: {detail}"
-            )
-        if private_key.is_symlink() or not private_key.is_file():
-            raise RuntimeError("ssh-keygen did not create a regular private key")
-        if public_key.is_symlink() or not public_key.is_file():
-            raise RuntimeError("ssh-keygen did not create a regular public key")
-        private_key.chmod(0o600)
-        public_key.chmod(0o600)
-        material = public_key.read_text(encoding="utf-8").strip()
-        if "\n" in material or not material.startswith("ssh-ed25519 "):
-            raise RuntimeError("ssh-keygen returned an invalid Ed25519 public key")
         self._ssh_private_key = private_key
         return material
 

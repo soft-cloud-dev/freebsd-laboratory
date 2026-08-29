@@ -190,6 +190,7 @@ pkg install -y \
     "${PY_TAG}-cryptography" \
     "${PY_TAG}-pytest" \
     "${PY_TAG}-pyyaml" \
+    "${PY_TAG}-llama-cpp-python" \
     "${PY_TAG}-certifi" \
     "${PY_TAG}-urllib3"
 
@@ -287,6 +288,7 @@ install_python_entrypoint "$JUPYTER_VENV/bin/jupyter" jupyter_core.command main
 install_python_entrypoint "$JUPYTER_VENV/bin/jupyter-server" jupyter_server.serverapp main
 install_python_entrypoint "$JUPYTER_VENV/bin/jupyter-lab" jupyterlab.labapp main
 install_python_entrypoint "$JUPYTER_VENV/bin/jupyter-labextension" jupyterlab.labextensions main
+ln -sf "$JUPYTER_VENV/bin/freebsd-lab-agent" /usr/local/bin/freebsd-lab-agent
 
 log "Building and registering the JupyterLab extension"
 (

@@ -39,6 +39,7 @@ def test_bootstrap_uses_freebsd_binary_runtime_dependencies() -> None:
     assert '"${PY_TAG}-jupyterlab"' in text
     assert '"${PY_TAG}-cryptography"' in text
     assert '"${PY_TAG}-pyyaml"' in text
+    assert '"${PY_TAG}-llama-cpp-python"' in text
     assert "--no-deps" in text
     assert "--no-build-isolation" not in text
     assert 'pip install -e ".[dev]"' not in text
@@ -68,6 +69,7 @@ def test_bootstrap_creates_venv_local_jupyter_entrypoints() -> None:
         'install_python_entrypoint "$JUPYTER_VENV/bin/jupyter-labextension" '
         "jupyterlab.labextensions main" in text
     )
+    assert 'ln -sf "$JUPYTER_VENV/bin/freebsd-lab-agent" /usr/local/bin/freebsd-lab-agent' in text
 
 
 def test_bootstrap_registers_server_extension_without_broken_enable_cli() -> None:

@@ -9,6 +9,7 @@ KERNELSPECS = (
     "freebsd-python",
     "freebsd-python-bhyve",
     "linux-python-bhyve",
+    "freebsd-python-host",
 )
 
 

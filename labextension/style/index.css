@@ -476,6 +476,65 @@ body.freebsdLab-ReferenceShell .freebsdLab-ExportButton .jp-ToolbarButtonCompone
   white-space: nowrap;
 }
 
+.freebsdLab-TokenBadge,
+body.freebsdLab-ReferenceShell .freebsdLab-TokenBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 27px;
+  max-height: 27px;
+  padding: 0 10px;
+  margin: 0 4px;
+  border: 1px solid var(--freebsd-lab-border-default);
+  border-radius: var(--freebsd-lab-radius-xs);
+  background: var(--freebsd-lab-surface-secondary);
+  color: var(--freebsd-lab-text-secondary);
+  font-family: var(--freebsd-lab-font-sans);
+  font-size: var(--freebsd-lab-font-size-base);
+  font-weight: var(--freebsd-lab-font-weight-medium);
+  white-space: nowrap;
+  user-select: none;
+  cursor: default;
+  box-sizing: border-box;
+  transition: all 0.15s ease;
+}
+
+.freebsdLab-TokenBadge-icon {
+  font-size: 12px;
+  line-height: 1;
+  color: var(--freebsd-lab-text-muted);
+}
+
+.freebsdLab-TokenBadge-text {
+  font-size: var(--freebsd-lab-font-size-base);
+  color: var(--freebsd-lab-text-secondary);
+}
+
+.freebsdLab-TokenBadge-count {
+  font-weight: var(--freebsd-lab-font-weight-bold);
+  font-family: var(--freebsd-lab-font-mono);
+  color: var(--freebsd-lab-text-primary);
+}
+
+.freebsdLab-TokenBadge.freebsdLab-TokenBadge--active,
+body.freebsdLab-ReferenceShell .freebsdLab-TokenBadge.freebsdLab-TokenBadge--active {
+  border-color: var(--freebsd-lab-red-border);
+  background: var(--freebsd-lab-red-soft);
+  color: var(--freebsd-lab-red);
+}
+
+.freebsdLab-TokenBadge--active .freebsdLab-TokenBadge-icon {
+  color: var(--freebsd-lab-red);
+}
+
+.freebsdLab-TokenBadge--active .freebsdLab-TokenBadge-text {
+  color: var(--freebsd-lab-red-dark);
+}
+
+.freebsdLab-TokenBadge--active .freebsdLab-TokenBadge-count {
+  color: var(--freebsd-lab-red-dark);
+}
+
 .freebsdLab-NotebookPath {
   box-sizing: border-box;
   min-height: 26px;

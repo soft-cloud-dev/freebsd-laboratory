@@ -6,7 +6,16 @@ from pathlib import Path
 from jupyter_server.extension.application import ExtensionApp
 from traitlets import Bool, Int, Unicode
 
-from .handlers import ExportHandler, EventHandler, SERVICE_SETTINGS_KEY, StateHandler
+from .handlers import (
+    AIAgentHandler,
+    AIGenerateHandler,
+    AIModelsHandler,
+    AIUsageHandler,
+    EventHandler,
+    ExportHandler,
+    SERVICE_SETTINGS_KEY,
+    StateHandler,
+)
 from .kernel_telemetry import SentryKernelWebsocketConnection
 from .runtime_client import DEFAULT_RUNTIME_SOCKET, RuntimeClient, RuntimeControlError
 from .service import LabService
@@ -93,5 +102,9 @@ class FreeBSDLaboratoryApp(ExtensionApp):
                 (r"/freebsd-lab/api/state", StateHandler),
                 (r"/freebsd-lab/api/events", EventHandler),
                 (r"/freebsd-lab/api/export", ExportHandler),
+                (r"/freebsd-lab/api/ai/models", AIModelsHandler),
+                (r"/freebsd-lab/api/ai/generate", AIGenerateHandler),
+                (r"/freebsd-lab/api/ai/agent", AIAgentHandler),
+                (r"/freebsd-lab/api/ai/usage", AIUsageHandler),
             ]
         )

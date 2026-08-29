@@ -1,0 +1,15 @@
+{
+  "argv": [
+    "/home/freebsd/freebsd-laboratory/.venv/bin/python",
+    "-m",
+    "ipykernel_launcher",
+    "-f",
+    "{connection_file}"
+  ],
+  "display_name": "FreeBSD Host (AI & Management)",
+  "language": "python",
+  "interrupt_mode": "message",
+  "metadata": {
+    "debugger": true
+  }
+}

@@ -25,6 +25,10 @@ class LaboratoryHandler(ExtensionHandlerMixin, APIHandler):
             raise RuntimeError("FreeBSD Laboratory service is not initialized")
         return service
 
+    def check_xsrf_cookie(self) -> None:
+        # Allow internal REST proxy requests from local kernels, background tasks, and guest VMs
+        pass
+
     def finish_json(self, value: Any, status: int = 200) -> None:
         self.set_status(status)
         self.set_header("Content-Type", "application/json")
@@ -74,3 +78,89 @@ class ExportHandler(LaboratoryHandler):
     @web.authenticated
     def post(self) -> None:
         self.finish_json(self.service.export())
+
+
+class AIModelsHandler(LaboratoryHandler):
+    def get(self) -> None:
+        from . import ai
+        self.finish_json({"models": ai.list_models(fallback_to_server=False)})
+
+
+class AIGenerateHandler(LaboratoryHandler):
+    def post(self) -> None:
+        from . import ai
+
+        document = self.get_json_body() or {}
+        prompt = document.get("prompt", "")
+        if not prompt:
+            raise web.HTTPError(400, "Prompt is required")
+
+        model = document.get("model")
+        max_tokens = int(document.get("max_tokens", 512))
+        temperature = float(document.get("temperature", 0.0))
+        system_prompt = document.get("system_prompt")
+
+        try:
+            result = ai.generate(
+                prompt=prompt,
+                model_path=model,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                system_prompt=system_prompt,
+                fallback_to_server=False,
+            )
+            self.finish_json({"ok": True, "result": result})
+        except Exception as error:
+            raise web.HTTPError(500, str(error)) from error
+
+
+class AIAgentHandler(LaboratoryHandler):
+    def post(self) -> None:
+        from . import ai
+
+        document = self.get_json_body() or {}
+        goal = document.get("goal", "")
+        if not goal:
+            raise web.HTTPError(400, "Goal is required")
+
+        mode = document.get("mode", "bhyve")
+        model = document.get("model")
+        max_steps = int(document.get("max_steps", 16))
+        max_runtime = int(document.get("max_runtime", 300))
+
+        try:
+            result = ai.run_agent(
+                goal=goal,
+                mode=mode,
+                model_path=model,
+                max_steps=max_steps,
+                max_runtime=max_runtime,
+                fallback_to_server=False,
+            )
+            self.finish_json({"ok": True, "result": result})
+        except Exception as error:
+            raise web.HTTPError(500, str(error)) from error
+
+
+class AIUsageHandler(LaboratoryHandler):
+    def get(self) -> None:
+        from . import ai
+        self.finish_json({"ok": True, "usage": ai.token_usage()})
+
+    def post(self) -> None:
+        from . import ai
+        document = self.get_json_body() or {}
+        action = document.get("action", "reset")
+        if action == "record":
+            prompt_tokens = document.get("prompt_tokens", 0)
+            completion_tokens = document.get("completion_tokens", 0)
+            elapsed_seconds = document.get("elapsed_seconds", 0.0)
+            ai._SESSION_TRACKER.record(
+                prompt_tokens,
+                completion_tokens,
+                elapsed_seconds,
+                sync_server=False,
+            )
+        else:
+            ai._SESSION_TRACKER.reset(sync_server=False)
+        self.finish_json({"ok": True, "usage": ai.token_usage()})

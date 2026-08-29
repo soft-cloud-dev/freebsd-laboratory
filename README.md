@@ -31,14 +31,15 @@ jupyter lab
 
 The Jupyter Server root must contain `lab.yaml`; the repository root contains the sample definition.
 
-`freebsd-lab-install-kernel` installs both runtime choices:
+`freebsd-lab-install-kernel` installs all runtime choices:
 
 ```text
-FreeBSD (Python 3, VNET jail) -> disposable VNET jail
-FreeBSD (Python 3, bhyve)      -> disposable bhyve VM
+FreeBSD (Python 3, VNET jail)   -> disposable VNET jail
+FreeBSD (Python 3, bhyve)        -> disposable bhyve VM
+FreeBSD Host (AI & Management)  -> host environment with local LLM & AI magics
 ```
 
-The sample notebook remains jail-backed by default. Use bhyve for experiments requiring a separate kernel, boot behavior, virtual hardware, kernel modules, or privileged guest networking.
+The sample notebook remains jail-backed by default. Use bhyve for experiments requiring a separate kernel, boot behavior, virtual hardware, kernel modules, or privileged guest networking. Use the host kernel for AI inference, local agent workflows, and administrative tasks.
 
 ## Privilege separation and caller authentication
 
@@ -250,6 +251,74 @@ freebsd-lab-verify-evidence .freebsd-lab/evidence/<session-id> \
 
 Without `--public-key`, verification proves only that the embedded key signed the manifest; it does not establish institutional trust in that key.
 
+## In-Notebook AI Inference & Autonomous Agent Subsystem
+
+FreeBSD Laboratory includes local, in-notebook LLM inference and autonomous agent diagnostics powered by `llama-cpp-python` and small instruction-tuned GGUF models (default: `google_gemma-4-E2B-it-Q4_K_M.gguf`).
+
+### 1. IPython Magics (`%ai`, `%%ai`, `%agent`, `%%agent`, `%ai_summary`)
+
+Load the magics in any notebook cell:
+
+```python
+%load_ext freebsd_laboratory.magics
+```
+
+- **Line Magic (`%ai <prompt>`)**: Ask FreeBSD systems architecture, kernel, or configuration questions rendered directly in rich GitHub-flavored Markdown:
+  ```python
+  %ai Explain the difference between FreeBSD UFS and ZFS.
+  ```
+
+- **Cell Magic (`%%ai [options]`)**: Synthesize systems engineering code, scripts, or configuration files:
+  ```python
+  %%ai --tokens 256
+  Write a Python ctypes script to read sysctl kern.boottime on FreeBSD.
+  ```
+
+- **Agent Magic (`%%agent [options]`)**: Launch an unprivileged autonomous agent inside an isolated bhyve VM or jail runtime to diagnose and resolve tasks:
+  ```python
+  %%agent --mode bhyve --steps 8
+  Inspect active network interfaces, IP addresses, and routing table inside the guest.
+  ```
+
+- **Session Token Summary (`%ai_summary` / `%ai_usage`)**: Inspect cumulative token usage and throughput across your session:
+  ```python
+  %ai_summary
+  ```
+
+### 2. Live Toolbar Token Badge
+
+The notebook toolbar contains a real-time token tracking badge:
+```text
+[ ⇩ Export evidence ] [ ⚡ Tokens: 1,420 ] [ ⚙ FreeBSD Host (AI & Management) ◯ ]
+```
+- Updates automatically after every cell execution.
+- Hovering reveals total, prompt, and completion token metrics with generation speed.
+- Resets automatically to `0` whenever the kernel restarts.
+
+### 3. Programmatic Python API (`freebsd_laboratory.ai`)
+
+```python
+from freebsd_laboratory import ai
+
+# Render rich Markdown in notebook
+ai.ask("What is a FreeBSD VNET jail?")
+
+# Raw text completion
+code = ai.generate("Write an rc.conf configuration for pf", max_tokens=128)
+
+# Discover installed GGUF models
+models = ai.list_models()
+
+# Inspect session token usage
+usage = ai.token_usage()
+print(f"Total Tokens: {usage['total_tokens']:,} across {usage['requests']} requests")
+```
+
+### 4. Showcase Notebooks
+
+- [`notebooks/AI_Inference_Showcase.ipynb`](file:///Users/user/data/Projects/freebsd-laboratory/notebooks/AI_Inference_Showcase.ipynb) — Interactive demonstration of in-notebook AI, code synthesis, agent diagnostics, and token metrics.
+- [`notebooks/Agent_Demo.ipynb`](file:///Users/user/data/Projects/freebsd-laboratory/notebooks/Agent_Demo.ipynb) — Full architecture demonstration of the autonomous agent controller.
+
 ## Evidence API
 
 Authenticated JSON endpoints use Jupyter Server's `APIHandler` and are mounted below the configured base URL:
@@ -258,6 +327,10 @@ Authenticated JSON endpoints use Jupyter Server's `APIHandler` and are mounted b
 GET  /freebsd-lab/api/state
 POST /freebsd-lab/api/events
 POST /freebsd-lab/api/export
+GET  /freebsd-lab/api/ai/models
+POST /freebsd-lab/api/ai/generate
+POST /freebsd-lab/api/ai/agent
+GET  /freebsd-lab/api/ai/usage
 ```
 
 Client POSTs remain restricted to observation events (`notebook-context` and `cell-executed`). Machine trust-stage events are separate server-side operations. Oversized payloads return HTTP 413 and exhausted sessions return HTTP 429.

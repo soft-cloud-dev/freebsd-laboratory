@@ -9,7 +9,7 @@ from .remote_connection import (
     restore_connection_file,
     rewrite_connection_file,
 )
-from .ssh_transport import SSHTransport, executable_exists
+from .ssh_transport import SSHTransport, create_runtime_ssh_key, executable_exists
 
 
 __all__ = [
@@ -18,6 +18,7 @@ __all__ = [
     "LocalPortReservation",
     "SSHTransport",
     "connection_ports",
+    "create_runtime_ssh_key",
     "executable_exists",
     "release_jupyter_cached_ports",
     "remote_kernel_command",
