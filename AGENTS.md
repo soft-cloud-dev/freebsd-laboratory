@@ -67,49 +67,32 @@ bridge network. See `ARCHITECTURE.md` for the full trust model.
   - Build script: `npm run build` executes `npm run build:lib` (`tsc`) followed by `npm run build:labextension` (`jupyter-builder build .`).
   - Keep `src/index.ts` and `lib/index.js` synchronized when modifying extension logic.
 
-## Build System Conventions
+## OS Distribution Family & Laboratory Architecture
 
-### Golden Image (bhyve)
+The FreeBSD Laboratory framework separates the **Operating System Distribution under study** from the **Execution Mechanism**:
+- **Distribution Repositories (`soft-cloud-dev/os-*`)**:
+  - `os-freebsd`: Builds native FreeBSD VNET jail templates and bhyve raw disk images.
+  - `os-linux`: Builds Linux EFI stub kernels (`kernel/build.sh`), Alpine/Debian rootfs, bhyve raw disk images (`runtime/bhyve/build-image.sh`), and Linuxulator targets.
+  - `os-laboratory-template`: Defines canonical JSON schemas (`schemas/artifact-v1.schema.json`, `schemas/os-v1.schema.json`), directory contracts, and MyST publication structures.
+- **Executor Repository (`soft-cloud-dev/freebsd-laboratory`)**:
+  - Acts as a pure execution engine (Jupyter provisioners, Unix socket runtime daemon, port lease manager, SSH transport, server extension).
+  - Ingests declarative `softcloud.artifact/v1` manifests via `ArtifactStore` (`freebsd_laboratory/artifact_store.py`) to resolve host-specific storage (ZFS datasets, disk image paths, zvols).
 
-- FreeBSD 15.x uses **`nuageinit`** (not Python `cloudinit`) for NoCloud
-  first-boot metadata. The vm-bhyve template seeds SSH keys and network config
-  through nuageinit's NoCloud datasource.
-- Package installations inside `vmimage.conf` must use `INSTALL_AS_USER=yes`
-  and `-o METALOG="${DESTDIR}/METALOG.pkg"` so that all installed files are
-  tracked by makefs and included in the final raw UFS image.
-- Run `ldconfig forcestart` (via `vm_refresh_ldconfig` or
-  `refresh_target_ldconfig`) after every package installation phase. Without
-  this, `/var/run/ld-elf.so.hints` won't include `/usr/local/lib` and shared
-  libraries like `libpython3.12.so.1` won't be found.
-- Unset `MAKEFLAGS` before any nested make invocations (e.g., `etcupdate
-  extract`) inside `mk-vmimage.sh` callbacks to prevent recursive flag leakage
-  from the parent release build.
-- The builder auto-detects host architecture from `uname -m` (supports
-  `amd64` and `arm64/aarch64`). Always pass `TARGET` and `TARGET_ARCH` to
-  `make -V .OBJDIR` when resolving the release object directory.
-- `pkg` bootstrap from ports requires `MAKE_ARGS=mandir=/usr/local/share/man`
-  to match the port's packing list expectations.
+## Build System Conventions & Artifact Contracts
 
-### Golden Image (jail)
+### Golden Image Artifact Contracts (`softcloud.artifact/v1`)
 
-- Source-based jail images use `build-jail-template.sh`.
-- The `refresh_target_ldconfig` helper must be called after each
-  `pkg_root install` phase (currently called 3 times total).
+- OS distribution builders emit declarative artifact manifests (`artifact-manifest.json`).
+- FreeBSD 15.x uses **`nuageinit`** (not Python `cloudinit`) for NoCloud first-boot metadata in `os-freebsd`.
+- Package installations in `os-freebsd/runtime/bhyve/vmimage.conf` use `INSTALL_AS_USER=yes` and `-o METALOG="${DESTDIR}/METALOG.pkg"`.
+- Target ldconfig linker hints (`/var/run/ld-elf.so.hints`) must include `/usr/local/lib` after package phases.
+- `freebsd-laboratory` never hardcodes internal build script paths of external `os-*` distributions; it consumes validated artifact manifests.
 
 ## Test Contracts
 
-- All shell script behaviors are verified by Python contract tests in `tests/`.
-- `test_golden_image_python_package_contract.py` asserts expected strings
-  and counts in `vmimage.conf`, `build-bhyve-image.sh`, and
-  `build-jail-template.sh`.
-- `test_golden_image_objdir_contract.py` verifies architecture detection,
-  object directory isolation, and ports requirements.
-- `test_bootstrap.py` verifies the bootstrap script's package lists and
-  conditional logic.
-- **When modifying any build shell script, always update the corresponding
-  contract test assertions.**
-- Run the full test suite with `.venv/bin/python -m pytest -v` on the
-  FreeBSD host. All tests must pass before committing.
+- All shell script behaviors in `os-freebsd` and `os-linux` are verified by contract tests in their respective repositories.
+- `test_artifact_store.py` in `freebsd-laboratory` validates `softcloud.artifact/v1` manifest ingestion, storage resolution, SHA-256 digest integrity, symlink rejection, and capability matching.
+- Run the full test suite with `.venv/bin/python -m pytest -v` on the FreeBSD host. All tests must pass before committing.
 
 ## SSH Transport
 
