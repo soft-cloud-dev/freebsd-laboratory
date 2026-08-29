@@ -50,6 +50,15 @@ def test_bootstrap_honors_pyproject_build_requirements() -> None:
     assert '"$JUPYTER_VENV/bin/python" -m pip install \\\n    --no-deps -e "$LAB_REPO_DIR"' in text
 
 
+def test_bootstrap_installs_jupyterlab_git_server_extension() -> None:
+    text = bootstrap_text()
+    assert 'jupyterlab-git>=0.54,<1' in text
+    assert (
+        '"$JUPYTER_VENV/bin/python" -m pip install \\\n'
+        '    --ignore-installed "jupyterlab-git>=0.54,<1"' in text
+    )
+
+
 def test_bootstrap_creates_venv_local_jupyter_entrypoints() -> None:
     text = bootstrap_text()
     assert (
@@ -74,11 +83,12 @@ def test_bootstrap_registers_server_extension_without_broken_enable_cli() -> Non
     text = bootstrap_text()
     assert "jupyter_server_config.d" in text
     assert '"freebsd_laboratory": true' in text
-    assert 'ExtensionPackage(name="freebsd_laboratory", enabled=True)' in text
+    assert 'for name in ("freebsd_laboratory", "jupyterlab_git"):' in text
+    assert 'ExtensionPackage(name=name, enabled=True)' in text
     assert "server extension enable" not in text
     assert (
         "import freebsd_laboratory, jupyter_builder, jupyter_core, "
-        "jupyter_server, jupyterlab" in text
+        "jupyter_server, jupyterlab, jupyterlab_git, sentry_sdk" in text
     )
 
 
