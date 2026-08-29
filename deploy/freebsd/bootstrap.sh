@@ -278,10 +278,12 @@ $PYTHON -m venv --system-site-packages "$JUPYTER_VENV"
     --no-deps -e "$LAB_REPO_DIR"
 "$JUPYTER_VENV/bin/python" -m pip install \
     --no-deps --ignore-installed "jupyter_builder>=1.2,<2"
+"$JUPYTER_VENV/bin/python" -m pip install \
+    --ignore-installed "jupyterlab-git>=0.54,<1"
 install_sentry_sdk "$JUPYTER_VENV"
 
 "$JUPYTER_VENV/bin/python" -c \
-    'import freebsd_laboratory, jupyter_builder, jupyter_core, jupyter_server, jupyterlab, sentry_sdk'
+    'import freebsd_laboratory, jupyter_builder, jupyter_core, jupyter_server, jupyterlab, jupyterlab_git, sentry_sdk'
 [ -x "$JUPYTER_VENV/bin/jupyter-builder" ] || fail "jupyter-builder entrypoint is missing"
 install_python_entrypoint "$JUPYTER_VENV/bin/jupyter" jupyter_core.command main
 install_python_entrypoint "$JUPYTER_VENV/bin/jupyter-server" jupyter_server.serverapp main
@@ -324,9 +326,10 @@ EOF
 "$JUPYTER_VENV/bin/python" - <<'PY'
 from jupyter_server.extension.manager import ExtensionPackage
 
-extension = ExtensionPackage(name="freebsd_laboratory", enabled=True)
-if not extension.validate():
-    raise SystemExit("freebsd_laboratory server extension validation failed")
+for name in ("freebsd_laboratory", "jupyterlab_git"):
+    extension = ExtensionPackage(name=name, enabled=True)
+    if not extension.validate():
+        raise SystemExit(f"{name} server extension validation failed")
 PY
 
 for path in \

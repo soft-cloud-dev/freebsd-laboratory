@@ -16,6 +16,7 @@ dependencies = [
   "jupyter-client>=8.6,<9",
   "jupyter-server>=2.15,<3",
   "jupyterlab>=4.3,<5",
+  "jupyterlab-git>=0.54,<1",
   "PyYAML>=6,<7",
   "sentry-sdk>=2,<3",
   "traitlets>=5.14,<6"
