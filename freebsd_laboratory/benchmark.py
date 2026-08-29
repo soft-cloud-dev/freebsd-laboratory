@@ -11,7 +11,6 @@ import os
 import platform
 import re
 import signal
-import socket
 import statistics
 import subprocess
 import sys
@@ -23,12 +22,12 @@ import urllib.request
 import uuid
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Sequence
+from typing import Any, Sequence
 
 import tornado.httpclient
 import tornado.websocket
 
-from .runtime_client import DEFAULT_RUNTIME_SOCKET, RuntimeClient, RuntimeControlError
+from .runtime_client import DEFAULT_RUNTIME_SOCKET, RuntimeClient
 
 
 RUNTIME_PRESETS: dict[str, dict[str, Any]] = {

@@ -241,32 +241,38 @@ class RemoteRuntimeProvisioner(LocalProvisioner):
             await self._create_runtime()
             transport = self._transport()
             transport.assert_available()
-            await asyncio.to_thread(transport.wait_until_ready, self.startup_timeout)
 
             if self.parent is None or self._runtime_name is None:
                 raise RuntimeError(
                     f"Kernel manager or {self.runtime_label} name is unavailable"
                 )
 
-            reservation = await asyncio.to_thread(
-                self._port_pool().allocate,
-                self._runtime_name,
-                os.getpid(),
-                len(CONNECTION_PORT_FIELDS),
-            )
-            self._tunnel_reservation = reservation
-
-            host_connection, original_ip, original_ports, tunnel_ports = (
-                rewrite_connection_file(
-                    self.parent,
-                    ports=reservation.ports,
+            async def _prepare_connection() -> tuple[Path, tuple[int, ...]]:
+                reservation = await asyncio.to_thread(
+                    self._port_pool().allocate,
+                    self._runtime_name,
+                    os.getpid(),
+                    len(CONNECTION_PORT_FIELDS),
                 )
+                self._tunnel_reservation = reservation
+
+                host_conn, original_ip, original_ports, tunnel_ports = (
+                    rewrite_connection_file(
+                        self.parent,
+                        ports=reservation.ports,
+                    )
+                )
+                self._original_connection_ip = original_ip
+                self._original_connection_ports = original_ports
+                self._tunnel_ports = tunnel_ports
+                release_jupyter_cached_ports(self, original_ports)
+                self.connection_info = self.parent.get_connection_info()
+                return host_conn, tunnel_ports
+
+            _, (host_connection, tunnel_ports) = await asyncio.gather(
+                asyncio.to_thread(transport.wait_until_ready, self.startup_timeout),
+                _prepare_connection(),
             )
-            self._original_connection_ip = original_ip
-            self._original_connection_ports = original_ports
-            self._tunnel_ports = tunnel_ports
-            release_jupyter_cached_ports(self, original_ports)
-            self.connection_info = self.parent.get_connection_info()
 
             remote_connection = await asyncio.to_thread(
                 transport.stage,

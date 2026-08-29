@@ -24,7 +24,6 @@ def test_golden_images_derive_python_flavor_from_python3() -> None:
 
     assert 'LAB_VM_PACKAGES=${LAB_VM_PACKAGES:-python3}' in vm_builder
     assert 'LAB_VM_IPYKERNEL_PACKAGE="$LAB_VM_IPYKERNEL_PACKAGE"' in vm_builder
-    assert 'LAB_VM_CLOUD_INIT_PACKAGE="$LAB_VM_CLOUD_INIT_PACKAGE"' in vm_builder
     assert 'LAB_PKG_AUDIT_ALLOWED_VULN_IDS="$LAB_PKG_AUDIT_ALLOWED_VULN_IDS"' in vm_builder
 
     assert ': ${LAB_VM_PACKAGES:="python3"}' in vm_config
@@ -33,12 +32,11 @@ def test_golden_images_derive_python_flavor_from_python3() -> None:
     assert 'LAB_VM_FREEBSD_UID=$(pw -R "${DESTDIR}" usershow freebsd -7' in vm_config
     assert 'print("py{}{}".format(sys.version_info.major, sys.version_info.minor))' in vm_config
     assert 'LAB_VM_IPYKERNEL_PACKAGE="${LAB_VM_PYTHON_TAG}-ipykernel"' in vm_config
-    assert 'LAB_VM_CLOUD_INIT_PACKAGE="${LAB_VM_PYTHON_TAG}-cloud-init"' in vm_config
     assert vm_config.count("INSTALL_AS_USER=yes ${PKG_CMD}") == 2
     assert vm_config.count('-o METALOG="${DESTDIR}/METALOG.pkg"') == 2
     assert vm_config.count('-o PKG_DBDIR="${DESTDIR}/var/db/pkg"') == 2
     assert 'install -y -r "${PKG_REPO_NAME}"' in vm_config
-    assert '"${LAB_VM_IPYKERNEL_PACKAGE}" "${LAB_VM_CLOUD_INIT_PACKAGE}"' in vm_config
+    assert '"${LAB_VM_IPYKERNEL_PACKAGE}" || return 1' in vm_config
     assert "vm_refresh_ldconfig()" in vm_config
     assert 'chroot "${DESTDIR}" /etc/rc.d/ldconfig forcestart || return 1' in vm_config
     assert 'chroot "${DESTDIR}" /sbin/ldconfig -r' in vm_config

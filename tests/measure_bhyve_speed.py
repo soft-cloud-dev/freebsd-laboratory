@@ -1,5 +1,7 @@
 import asyncio
+import http.cookiejar
 import json
+import sys
 import time
 import urllib.request
 import uuid
@@ -8,22 +10,44 @@ import tornado.websocket
 TOKEN = "b57a598d09c577a53bce6e40c614e1fc7ded873520841708"
 BASE_URL = "http://127.0.0.1:8888"
 WS_URL = "ws://127.0.0.1:8888"
+KERNEL_NAME = sys.argv[1] if len(sys.argv) > 1 else "freebsd-python-bhyve"
 
 async def run() -> None:
+    cookie_jar = http.cookiejar.CookieJar()
+    opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cookie_jar))
+    urllib.request.install_opener(opener)
+
+    # Establish session and obtain XSRF cookie if required
+    pre_req = urllib.request.Request(f"{BASE_URL}/lab?token={TOKEN}")
+    try:
+        opener.open(pre_req)
+    except Exception:
+        pass
+
+    xsrf = ""
+    for cookie in cookie_jar:
+        if cookie.name == "_xsrf":
+            xsrf = cookie.value
+
     headers = {
         "Authorization": f"token {TOKEN}",
         "Content-Type": "application/json",
     }
-    
+    url = f"{BASE_URL}/api/kernels"
+    if xsrf:
+        headers["X-XSRFToken"] = xsrf
+        headers["Cookie"] = f"_xsrf={xsrf}"
+        url = f"{url}?_xsrf={xsrf}"
+
     t0 = time.monotonic()
-    print("Requesting freebsd-python-bhyve kernel...", flush=True)
+    print(f"Requesting {KERNEL_NAME} kernel...", flush=True)
     req = urllib.request.Request(
-        f"{BASE_URL}/api/kernels",
-        data=json.dumps({"name": "freebsd-python-bhyve"}).encode("utf-8"),
+        url,
+        data=json.dumps({"name": KERNEL_NAME}).encode("utf-8"),
         headers=headers,
         method="POST",
     )
-    resp = json.loads(urllib.request.urlopen(req).read().decode("utf-8"))
+    resp = json.loads(opener.open(req).read().decode("utf-8"))
     kernel_id = resp["id"]
     t_created = time.monotonic() - t0
     print(f"Kernel {kernel_id} created in {t_created:.2f}s", flush=True)

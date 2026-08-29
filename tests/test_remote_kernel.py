@@ -224,6 +224,7 @@ def test_ssh_transport_retries_timed_out_readiness_probe(tmp_path: Path) -> None
     ready = subprocess.CompletedProcess(["ssh"], 0, "", "")
 
     with (
+        patch.object(SSHTransport, "_probe_tcp", return_value=True),
         patch.object(
             SSHTransport,
             "_run",
@@ -236,6 +237,17 @@ def test_ssh_transport_retries_timed_out_readiness_probe(tmp_path: Path) -> None
     assert run.call_count == 2
     first_timeout = run.call_args_list[0].kwargs["timeout"]
     assert 16 <= first_timeout <= 17
+
+
+def test_ssh_transport_probe_tcp_handles_connection_failure(tmp_path: Path) -> None:
+    transport = SSHTransport(
+        host="172.31.254.10",
+        user="freebsd",
+        private_key="/tmp/lab-key",
+        known_hosts_file=tmp_path / "known_hosts",
+    )
+    with patch("socket.create_connection", side_effect=OSError("connection refused")):
+        assert transport._probe_tcp(timeout=0.1) is False
 
 
 def test_ssh_transport_accepts_default_device_config(tmp_path: Path) -> None:
